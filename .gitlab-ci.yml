@@ -1,0 +1,112 @@
+stages:
+  - validate
+  - security
+  - build
+  - sbom
+  - gitops_update
+
+variables:
+  REGISTRY_IMAGE_PREFIX: "$CI_REGISTRY_IMAGE"
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+  GITOPS_REPO_URL: "https://github.com/truong-devops/aiops-gitops-manifests.git"
+
+workflow:
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event'"
+    - if: "$CI_COMMIT_BRANCH"
+
+validate:go:
+  stage: validate
+  image: golang:1.23
+  script:
+    - |
+      set -eu
+      found=0
+      for mod in services/*/go.mod; do
+        [ -f "$mod" ] || continue
+        found=1
+        svc_dir="$(dirname "$mod")"
+        echo "Testing $svc_dir"
+        (cd "$svc_dir" && go test ./...)
+      done
+      [ "$found" = "1" ] || echo "No Go modules yet"
+
+validate:python:
+  stage: validate
+  image: python:3.12-slim
+  script:
+    - |
+      set -eu
+      if [ -f services/aiops-service/pyproject.toml ]; then
+        python -m compileall services/aiops-service/app
+      else
+        echo "No Python service yet"
+      fi
+
+validate:manifests:
+  stage: validate
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl kustomize deploy/k8s/overlays/dev >/tmp/dev.yaml
+    - kubectl kustomize deploy/k8s/overlays/demo >/tmp/demo.yaml
+
+security:gitleaks:
+  stage: security
+  image: zricethezav/gitleaks:latest
+  script:
+    - gitleaks detect --source . --no-git --redact --verbose
+  allow_failure: true
+
+security:trivy-fs:
+  stage: security
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs --exit-code 0 --format table .
+  artifacts:
+    when: always
+    paths:
+      - trivy-fs-report.txt
+    expire_in: 7 days
+  after_script:
+    - trivy fs --exit-code 0 --format table . > trivy-fs-report.txt || true
+
+build:images:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - |
+      set -eu
+      for dockerfile in services/*/Dockerfile apps/*/Dockerfile; do
+        [ -f "$dockerfile" ] || continue
+        component_dir="$(dirname "$dockerfile")"
+        component="$(basename "$component_dir")"
+        image="$REGISTRY_IMAGE_PREFIX/$component:$IMAGE_TAG"
+        echo "Building $image from $component_dir"
+        docker build -t "$image" "$component_dir"
+      done
+  rules:
+    - if: "$CI_COMMIT_BRANCH"
+
+sbom:syft:
+  stage: sbom
+  image: anchore/syft:latest
+  script:
+    - syft dir:. -o spdx-json=sbom.spdx.json
+  artifacts:
+    paths:
+      - sbom.spdx.json
+    expire_in: 14 days
+
+gitops:update:
+  stage: gitops_update
+  image: alpine/git:latest
+  script:
+    - echo "Update image tags in $GITOPS_REPO_URL after image registry is configured."
+    - echo "This job should create a GitOps MR instead of applying manifests directly."
+  rules:
+    - if: "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+      when: manual
