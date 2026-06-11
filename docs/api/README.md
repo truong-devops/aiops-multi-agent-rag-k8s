@@ -7,3 +7,7 @@ Gợi ý:
 - OpenAPI cho REST APIs.
 - AsyncAPI cho Redpanda/Kafka events.
 - JSON Schema cho incident context và RCA report.
+
+Current design notes:
+
+- [Product API Surface](./product-api-surface.md)

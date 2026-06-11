@@ -10,3 +10,7 @@ Nơi lưu API và event contracts.
 - Error code catalog.
 
 Contract nên được version hóa để Deployment Agent có thể đọc diff khi RCA.
+
+## Current Notes
+
+- [Event Contracts](./event-contracts.md)

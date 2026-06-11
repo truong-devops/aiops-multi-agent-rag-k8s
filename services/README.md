@@ -13,6 +13,13 @@ Backend product services dự kiến dùng Go. `aiops-service` dự kiến dùng
 - `live-service`: live session, stream key, MediaMTX integration.
 - `aiops-service`: collectors, RAG, agents, RCA scoring, redaction.
 
+Service boundaries and ownership are defined in:
+
+- [Product Design](../docs/architecture/product-design.md)
+- [Service Boundaries](../docs/architecture/service-boundaries.md)
+- [Data Ownership](../docs/architecture/data-ownership.md)
+- [Event Contracts](../packages/contracts/event-contracts.md)
+
 ## Convention Cho Go Service
 
 ```text
