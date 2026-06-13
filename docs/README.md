@@ -20,3 +20,4 @@ Roadmap HTML chi tiết được giữ ngoài repo source tại `../lo_trinh_tri
 4. [Product API Surface](./api/product-api-surface.md)
 5. [Event Contracts](../packages/contracts/event-contracts.md)
 6. [Identity Service Plan](./service/identity-service-plan.md)
+7. [API Gateway Plan](./service/api-gateway-plan.md)

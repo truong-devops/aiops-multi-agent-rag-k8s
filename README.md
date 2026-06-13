@@ -6,7 +6,7 @@ The project combines a microservices product with an Evidence-aware Multi-Agent 
 
 The main focus areas are:
 
-- Product engineering for a video/livestream platform.
+- Product engineering for an API-gateway-fronted video/livestream platform.
 - Kubernetes-based deployment and observability.
 - DevSecOps and GitOps delivery workflows.
 - Multi-Agent RAG for incident investigation and root cause analysis.

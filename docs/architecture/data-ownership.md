@@ -6,6 +6,7 @@ Data ownership prevents hidden coupling between services. A service may expose A
 
 | Data | Owner | Notes |
 |---|---|---|
+| Public routing policy | `api-gateway` | No product business data. |
 | User account | `identity-service` | Auth and profile source of truth. |
 | User credentials/session | `identity-service` | Must be protected and never sent to AIOps. |
 | Video metadata | `video-service` | Canonical video lifecycle state. |
@@ -24,6 +25,7 @@ Data ownership prevents hidden coupling between services. A service may expose A
 - Do not share database schemas between services.
 - Denormalized read models are allowed if they are built from events.
 - Admin web should call APIs, not databases.
+- External clients should call services through `api-gateway`.
 
 ## State That Must Be Explicit
 

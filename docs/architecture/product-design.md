@@ -13,6 +13,7 @@ Sản phẩm không cần cạnh tranh đầy đủ với TikTok/YouTube, nhưng
 - User tương tác cơ bản: like, comment, follow.
 - Creator tạo livestream session.
 - Admin quan sát video, job xử lý, live session, incident và RCA report.
+- Client đi qua API Gateway thay vì gọi trực tiếp từng service nội bộ.
 
 ## Core User Roles
 
@@ -30,6 +31,12 @@ Sản phẩm không cần cạnh tranh đầy đủ với TikTok/YouTube, nhưng
 Quản lý đăng ký, đăng nhập, profile cơ bản, JWT/session và user context.
 
 Không đưa logic video/feed/live vào service này.
+
+### API Gateway
+
+Là entrypoint HTTP của sản phẩm. Gateway route request từ admin web/mobile đến các service nội bộ, gắn request/correlation ID, áp CORS/rate limit và về sau verify JWT bằng JWKS từ identity-service.
+
+Gateway không chứa business logic và không sở hữu database nghiệp vụ.
 
 ### Video
 
@@ -70,8 +77,11 @@ Admin web là trung tâm demo sản phẩm và AIOps:
 ## Primary Product Flow
 
 ```text
-User login
--> create video upload request
+Client calls api-gateway
+-> api-gateway routes auth request to identity-service
+-> user login
+-> client creates video upload request through api-gateway
+-> api-gateway routes request to video-service
 -> upload file to MinIO
 -> video-service stores metadata
 -> video-service publishes video.uploaded
@@ -80,7 +90,7 @@ User login
 -> FFmpeg processes video and thumbnail
 -> media-worker updates video status
 -> feed-social-service exposes ready video
--> admin-web shows processing history and health
+-> admin-web shows processing history and health through api-gateway
 ```
 
 ## Livestream Flow
@@ -110,6 +120,7 @@ Không thêm các service này ngay từ đầu, nhưng thiết kế hiện tạ
 ## Product-Grade Rules
 
 - Mỗi service sở hữu database/schema của mình; service khác không đọc thẳng DB.
+- Client gọi API qua `api-gateway`; service nội bộ không expose public trực tiếp khi deploy Kubernetes.
 - Giao tiếp đồng bộ dùng HTTP/gRPC qua API rõ ràng.
 - Giao tiếp bất đồng bộ dùng event contract rõ ràng.
 - Mọi request phải có `request_id` hoặc `trace_id`.

@@ -7,6 +7,7 @@ Backend product services dự kiến dùng Go. `aiops-service` dự kiến dùng
 ## Services
 
 - `identity-service`: auth, user profile, JWT/session.
+- `api-gateway`: public API entrypoint, routing, request context, auth verification later.
 - `video-service`: upload request, video metadata, MinIO integration, event publishing.
 - `media-worker`: consume video events, FFmpeg processing, thumbnail, retry/dead-letter.
 - `feed-social-service`: feed, like/comment/follow ở mức product demo.
@@ -19,6 +20,7 @@ Service boundaries and ownership are defined in:
 - [Service Boundaries](../docs/architecture/service-boundaries.md)
 - [Data Ownership](../docs/architecture/data-ownership.md)
 - [Event Contracts](../packages/contracts/event-contracts.md)
+- [API Gateway Plan](../docs/service/api-gateway-plan.md)
 
 ## Convention Cho Go Service
 

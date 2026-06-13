@@ -6,12 +6,35 @@ Thiết kế service theo bounded context. Mỗi service có quyền sở hữu 
 
 | Service | Owns | Exposes | Emits | Does Not Own |
 |---|---|---|---|---|
+| `api-gateway` | routing/policy config, request context | public API entrypoint | access logs/metrics | product business data |
 | `identity-service` | users, credentials, sessions, profiles | auth/profile APIs | `user.created`, `user.updated` | video, feed, live data |
 | `video-service` | video metadata, upload requests, video status | video/upload/status APIs | `video.uploaded`, `video.status_changed` | FFmpeg processing |
 | `media-worker` | processing jobs, attempts, worker status | health/metrics, optional job admin APIs | `video.processing_started`, `video.ready`, `video.processing_failed` | user-facing video metadata ownership |
 | `feed-social-service` | feed view, likes, comments, follows | feed/social APIs | `video.liked`, `comment.created`, `user.followed` | video upload/processing |
 | `live-service` | live sessions, stream keys, live status | live session APIs | `live.started`, `live.ended`, `live.failed` | media processing pipeline |
 | `aiops-service` | incidents, evidence packs, RCA reports | incident/RCA APIs | `rca.completed`, `remediation.proposed` | product business data |
+
+## api-gateway
+
+Responsibilities:
+
+- Route public API traffic to internal services.
+- Attach `request_id` and `correlation_id`.
+- Apply CORS, body limit, timeout and rate limit policies.
+- Verify JWT using JWKS from `identity-service` later.
+- Forward user context to internal services after verification.
+
+Data ownership:
+
+- No product database.
+- Only routing/policy config and operational logs/metrics.
+
+Must not:
+
+- Store user/video/feed/live data.
+- Generate platform tokens.
+- Implement product business logic.
+- Query service databases directly.
 
 ## identity-service
 

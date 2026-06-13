@@ -2,6 +2,23 @@
 
 This is the initial API surface for the product. It is not a full OpenAPI spec yet; it defines what each service is expected to expose.
 
+Public clients should call APIs through `api-gateway` using `/api/v1/*`. Internal services can keep their own `/v1/*` routes.
+
+## api-gateway
+
+```text
+GET /healthz
+GET /readyz
+GET /metrics
+
+/api/v1/auth/*          -> identity-service
+/api/v1/users/*         -> identity-service
+/api/v1/videos/*        -> video-service
+/api/v1/feed*           -> feed-social-service
+/api/v1/live-sessions/* -> live-service
+/api/v1/incidents/*     -> aiops-service
+```
+
 ## identity-service
 
 ```text
