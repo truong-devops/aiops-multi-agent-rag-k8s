@@ -17,7 +17,7 @@ workflow:
 
 validate:go:
   stage: validate
-  image: golang:1.23
+  image: golang:1.24.13-bookworm
   script:
     - |
       set -eu
@@ -33,7 +33,7 @@ validate:go:
 
 validate:python:
   stage: validate
-  image: python:3.12-slim
+  image: python:3.12.13-slim-bookworm
   script:
     - |
       set -eu
