@@ -10,4 +10,5 @@ Gợi ý:
 
 Current design notes:
 
+- [RESTful API Design](./rest-api-design.md)
 - [Product API Surface](./product-api-surface.md)
