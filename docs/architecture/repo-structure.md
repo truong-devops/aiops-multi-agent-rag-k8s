@@ -15,6 +15,16 @@ tests/         e2e, smoke and load tests
 tools/         incident injector, log generator, RCA evaluator
 ```
 
+## Runtime Và Version
+
+Runtime, image nền và dependency policy được cố định tại [Dependency Versioning](../development/dependency-versioning.md).
+
+Baseline hiện tại:
+
+- Go services: Go `1.24`, toolchain `go1.24.13`.
+- `aiops-service`: Python `3.12.13`.
+- Admin web và mobile app chưa scaffold chính thức; version sẽ được chốt trong tài liệu versioning trước khi thêm dependency.
+
 ## Quy Tắc Mở Rộng
 
 - Service mới đặt trong `services/<name>`.

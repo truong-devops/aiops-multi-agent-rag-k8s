@@ -4,6 +4,8 @@
 
 Mục tiêu là làm đủ chuẩn để mở rộng về sau, nhưng vẫn triển khai được theo MVP.
 
+Runtime baseline: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine3.23`. Chi tiết version nằm ở [Dependency Versioning](../development/dependency-versioning.md).
+
 ## 1. Vai trò của identity-service
 
 `identity-service` chịu trách nhiệm:

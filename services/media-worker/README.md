@@ -2,6 +2,8 @@
 
 Worker xử lý video bất đồng bộ bằng FFmpeg.
 
+Runtime: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine3.23`.
+
 ## Trách Nhiệm
 
 - Consume event `video.uploaded`.

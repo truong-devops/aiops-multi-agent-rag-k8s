@@ -2,6 +2,8 @@
 
 Product edge service for routing public API requests to internal services.
 
+Runtime: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine3.23`.
+
 Initial responsibilities:
 
 - Route `/api/v1/auth/*` and `/api/v1/users/*` to `identity-service`.

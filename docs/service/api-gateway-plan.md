@@ -2,6 +2,8 @@
 
 `api-gateway` là entrypoint chính của sản phẩm. Client không nên gọi trực tiếp từng service nội bộ khi sản phẩm bắt đầu có nhiều service. Gateway giúp chuẩn hóa routing, CORS, request ID, rate limit, auth verification và forwarding user context.
 
+Runtime baseline: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine3.23`. Chi tiết version nằm ở [Dependency Versioning](../development/dependency-versioning.md).
+
 ## 1. Vai trò
 
 `api-gateway` chịu trách nhiệm:

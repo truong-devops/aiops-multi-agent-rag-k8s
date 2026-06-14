@@ -2,7 +2,14 @@
 
 Thư mục này chứa backend services và worker của sản phẩm video/livestream.
 
-Backend product services dự kiến dùng Go. `aiops-service` dự kiến dùng Python FastAPI vì thuận lợi hơn cho RAG, agent orchestration, embedding và data processing.
+Backend product services dùng Go. `aiops-service` dùng Python FastAPI vì thuận lợi hơn cho RAG, agent orchestration, embedding và data processing.
+
+Runtime baseline hiện tại:
+
+- Go services: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine3.23`.
+- `aiops-service`: Python `3.12.13`, Docker runtime `python:3.12.13-slim-bookworm`.
+
+Chi tiết version và dependency policy được cố định ở [Dependency Versioning](../docs/development/dependency-versioning.md). Khi đổi runtime hoặc dependency trực tiếp, cập nhật tài liệu đó trong cùng thay đổi.
 
 ## Services
 
@@ -21,6 +28,7 @@ Service boundaries and ownership are defined in:
 - [Data Ownership](../docs/architecture/data-ownership.md)
 - [Event Contracts](../packages/contracts/event-contracts.md)
 - [API Gateway Plan](../docs/service/api-gateway-plan.md)
+- [Dependency Versioning](../docs/development/dependency-versioning.md)
 
 ## Convention Cho Go Service
 

@@ -2,6 +2,10 @@
 
 AIOps service cho RCA bằng Evidence-aware Multi-Agent RAG.
 
+Runtime cố định: Python `3.12.13`, Docker image `python:3.12.13-slim-bookworm`.
+
+Dependency trực tiếp được pin trong `pyproject.toml`; khi cài dependency mới phải cập nhật [Dependency Versioning](../../docs/development/dependency-versioning.md).
+
 ## Trách Nhiệm
 
 - Nhận incident context.
@@ -25,6 +29,7 @@ aiops-service/
 │   ├── redaction/
 │   └── schemas/
 ├── tests/
+├── .python-version
 ├── Dockerfile
 ├── pyproject.toml
 └── README.md

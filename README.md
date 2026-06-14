@@ -12,3 +12,5 @@ The main focus areas are:
 - Multi-Agent RAG for incident investigation and root cause analysis.
 
 This repository contains the application source, service code, local development setup, documentation, testing assets, and supporting tools. Kubernetes desired state is managed separately in the companion GitOps repository.
+
+Runtime and dependency versions are fixed in [Dependency Versioning](./docs/development/dependency-versioning.md). Current backend baseline: Go services use Go `1.24` with toolchain `go1.24.13`; `aiops-service` uses Python `3.12.13`.
