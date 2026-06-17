@@ -1,16 +1,21 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/api-gateway/internal/config"
 )
 
 type route struct {
+	name   string
 	prefix string
 	target *url.URL
 	proxy  *httputil.ReverseProxy
@@ -21,45 +26,88 @@ type Gateway struct {
 	logger *slog.Logger
 }
 
-func NewGateway(routes []config.Route, logger *slog.Logger) (*Gateway, error) {
+func NewGateway(routes []config.Route, upstreamTimeout time.Duration, logger *slog.Logger) (*Gateway, error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
 	gateway := &Gateway{logger: logger}
 	for _, cfgRoute := range routes {
+		if cfgRoute.Prefix == "" || !strings.HasPrefix(cfgRoute.Prefix, "/api/") {
+			return nil, fmt.Errorf("route %q must start with /api/", cfgRoute.Prefix)
+		}
+		if cfgRoute.Target == nil || cfgRoute.Target.Scheme == "" || cfgRoute.Target.Host == "" {
+			return nil, fmt.Errorf("route %q target must include scheme and host", cfgRoute.Prefix)
+		}
+
 		target := *cfgRoute.Target
+		prefix := cfgRoute.Prefix
+		name := cfgRoute.Name
+		if name == "" {
+			name = target.Host
+		}
+
 		proxy := httputil.NewSingleHostReverseProxy(&target)
 		originalDirector := proxy.Director
-		prefix := cfgRoute.Prefix
 
 		proxy.Director = func(req *http.Request) {
+			originalHost := req.Host
+			originalScheme := forwardedProto(req)
 			originalDirector(req)
 			req.URL.Path = trimPublicAPIPrefix(req.URL.Path)
+			req.URL.RawPath = ""
 			req.Host = target.Host
-			req.Header.Set("X-Forwarded-Host", req.Host)
+			req.Header.Set("X-Forwarded-Host", originalHost)
+			req.Header.Set("X-Forwarded-Proto", originalScheme)
 			req.Header.Set("X-Gateway", "api-gateway")
 		}
 
 		proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
-			logger.Error("proxy request failed", "path", req.URL.Path, "error", err)
-			http.Error(w, "upstream unavailable", http.StatusBadGateway)
+			logger.Error("proxy request failed", "upstream_service", name, "path", req.URL.Path, "error", err)
+			WriteError(w, req, http.StatusBadGateway, "UPSTREAM_UNAVAILABLE", "Upstream service is unavailable.")
+		}
+
+		if upstreamTimeout > 0 {
+			proxy.Transport = &http.Transport{
+				Proxy:                 http.ProxyFromEnvironment,
+				ResponseHeaderTimeout: upstreamTimeout,
+			}
 		}
 
 		gateway.routes = append(gateway.routes, route{
+			name:   name,
 			prefix: prefix,
 			target: &target,
 			proxy:  proxy,
 		})
 	}
+	sort.SliceStable(gateway.routes, func(i, j int) bool {
+		return len(gateway.routes[i].prefix) > len(gateway.routes[j].prefix)
+	})
 	return gateway, nil
 }
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for _, route := range g.routes {
-		if strings.HasPrefix(req.URL.Path, route.prefix) {
-			g.logger.Debug("proxying request", "prefix", route.prefix, "target", route.target.String(), "path", req.URL.Path)
+		if matchRoute(req.URL.Path, route.prefix) {
+			g.logger.Debug(
+				"proxying request",
+				"upstream_service", route.name,
+				"prefix", route.prefix,
+				"target", route.target.String(),
+				"path", req.URL.Path,
+			)
 			route.proxy.ServeHTTP(w, req)
 			return
 		}
 	}
-	http.NotFound(w, req)
+	WriteError(w, req, http.StatusNotFound, "ROUTE_NOT_FOUND", "No API route matched the request path.")
+}
+
+func matchRoute(path string, prefix string) bool {
+	if strings.HasSuffix(prefix, "/") {
+		return strings.HasPrefix(path, prefix)
+	}
+	return path == prefix || strings.HasPrefix(path, prefix+"/")
 }
 
 func trimPublicAPIPrefix(path string) string {
@@ -68,4 +116,39 @@ func trimPublicAPIPrefix(path string) string {
 		return "/"
 	}
 	return trimmed
+}
+
+func forwardedProto(req *http.Request) string {
+	if proto := req.Header.Get("X-Forwarded-Proto"); proto != "" {
+		return proto
+	}
+	if req.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+func WriteError(w http.ResponseWriter, req *http.Request, status int, code string, message string) {
+	requestID := req.Header.Get("X-Request-ID")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(errorResponse{
+		Error: errorBody{
+			Code:    code,
+			Message: message,
+			Details: map[string]string{},
+		},
+		RequestID: requestID,
+	})
+}
+
+type errorResponse struct {
+	Error     errorBody `json:"error"`
+	RequestID string    `json:"request_id,omitempty"`
+}
+
+type errorBody struct {
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Details map[string]string `json:"details"`
 }

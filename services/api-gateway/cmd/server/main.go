@@ -30,16 +30,21 @@ func main() {
 	mux.HandleFunc("/readyz", textHandler("ready\n"))
 	mux.HandleFunc("/metrics", textHandler("# metrics placeholder\n"))
 
-	gatewayHandler, err := handler.NewGateway(cfg.Routes, logger)
+	gatewayHandler, err := handler.NewGateway(cfg.Routes, cfg.UpstreamTimeout, logger)
 	if err != nil {
 		logger.Error("failed to create gateway", "error", err)
 		os.Exit(1)
 	}
 	mux.Handle("/api/", gatewayHandler)
 
+	var app http.Handler = mux
+	app = observability.BodyLimitMiddleware(cfg.RequestBodyLimitBytes, app)
+	app = observability.CORSMiddleware(cfg.CORSAllowedOrigins, app)
+	app = observability.RequestContextMiddleware(logger, app)
+
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           observability.RequestContextMiddleware(logger, mux),
+		Handler:           app,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
