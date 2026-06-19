@@ -42,12 +42,12 @@ Nếu module chưa có dependency bên ngoài thì lockfile có thể chưa tồ
 
 ### Go services
 
-Các Go service hiện tại đang dùng Go `1.24` với toolchain `go1.24.13` và chưa có dependency bên ngoài.
+Các Go service hiện tại đang dùng Go `1.24` với toolchain `go1.24.13`. Direct dependencies phải pin exact version trong từng `go.mod`.
 
 | Module | Runtime | External libraries |
 |---|---:|---|
 | `services/api-gateway` | Go `1.24`, toolchain `go1.24.13` | none |
-| `services/identity-service` | Go `1.24`, toolchain `go1.24.13` | none |
+| `services/identity-service` | Go `1.24`, toolchain `go1.24.13` | `github.com/jackc/pgx/v5 v5.8.0` |
 | `services/video-service` | Go `1.24`, toolchain `go1.24.13` | none |
 | `services/feed-social-service` | Go `1.24`, toolchain `go1.24.13` | none |
 | `services/live-service` | Go `1.24`, toolchain `go1.24.13` | none |
