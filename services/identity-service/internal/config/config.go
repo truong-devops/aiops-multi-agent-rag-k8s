@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"strings"
@@ -14,6 +15,7 @@ type Config struct {
 	Issuer          string
 	Audience        string
 	SigningKeyPEM   string
+	DatabaseURL     string
 	AccessTokenTTL  time.Duration
 	RefreshTokenTTL time.Duration
 
@@ -33,6 +35,7 @@ func Load() Config {
 		Issuer:             getenv("JWT_ISSUER", "aiops-video-platform"),
 		Audience:           getenv("JWT_AUDIENCE", "aiops-api"),
 		SigningKeyPEM:      os.Getenv("SIGNING_KEY_PEM"),
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
 		AccessTokenTTL:     parseDuration(getenv("ACCESS_TOKEN_TTL", "15m"), 15*time.Minute),
 		RefreshTokenTTL:    parseDuration(getenv("REFRESH_TOKEN_TTL", "168h"), 7*24*time.Hour),
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
@@ -41,6 +44,32 @@ func Load() Config {
 		GoogleTokenURL:     getenv("GOOGLE_TOKEN_URL", "https://oauth2.googleapis.com/token"),
 		GoogleJWKSURL:      getenv("GOOGLE_JWKS_URL", "https://www.googleapis.com/oauth2/v3/certs"),
 		GoogleScopes:       parseCSV(getenv("GOOGLE_SCOPES", "openid,email,profile")),
+	}
+}
+
+func (c Config) Validate() error {
+	if c.IsLocal() {
+		return nil
+	}
+	if strings.TrimSpace(c.DatabaseURL) == "" {
+		return fmt.Errorf("DATABASE_URL is required when ENVIRONMENT=%s", c.Environment)
+	}
+	if strings.TrimSpace(c.SigningKeyPEM) == "" {
+		return fmt.Errorf("SIGNING_KEY_PEM is required when ENVIRONMENT=%s", c.Environment)
+	}
+	return nil
+}
+
+func (c Config) UsePostgres() bool {
+	return strings.TrimSpace(c.DatabaseURL) != ""
+}
+
+func (c Config) IsLocal() bool {
+	switch strings.ToLower(strings.TrimSpace(c.Environment)) {
+	case "", "local", "dev", "development", "test":
+		return true
+	default:
+		return false
 	}
 }
 
