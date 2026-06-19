@@ -326,6 +326,9 @@ func (s *PostgresStore) RotateRefreshToken(ctx context.Context, oldTokenID strin
 		return ErrRefreshTokenNotActive
 	}
 
+	if err := insertRefreshToken(ctx, tx, newToken); err != nil {
+		return err
+	}
 	_, err = tx.ExecContext(ctx, `
 		UPDATE refresh_tokens
 		SET status = $2, used_at = $3, replaced_by = $4
@@ -340,9 +343,6 @@ func (s *PostgresStore) RotateRefreshToken(ctx context.Context, oldTokenID strin
 		WHERE id = $1
 	`, sessionID, now)
 	if err != nil {
-		return err
-	}
-	if err := insertRefreshToken(ctx, tx, newToken); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -256,6 +258,18 @@ func TestIdentityUnknownRouteReturnsJSONError(t *testing.T) {
 	assertErrorCode(t, resp.Body.Bytes(), "ROUTE_NOT_FOUND")
 }
 
+func TestIdentityReadinessFailureReturnsServiceUnavailable(t *testing.T) {
+	app := newTestAppWithReadiness(t, func(context.Context) error {
+		return errors.New("database is down")
+	})
+
+	resp := doJSON(t, app, http.MethodGet, "/readyz", nil, "")
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("readyz status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	assertErrorCode(t, resp.Body.Bytes(), "SERVICE_NOT_READY")
+}
+
 func newTestApp(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -283,6 +297,23 @@ func newTestAppWithGoogleConfig(t *testing.T) http.Handler {
 func newTestAppWithGoogle(t *testing.T, googleConfig service.GoogleOAuthConfig) http.Handler {
 	t.Helper()
 
+	return newTestAppWithGoogleAndReadiness(t, googleConfig, nil)
+}
+
+func newTestAppWithReadiness(t *testing.T, readiness func(context.Context) error) http.Handler {
+	t.Helper()
+
+	return newTestAppWithGoogleAndReadiness(t, service.GoogleOAuthConfig{
+		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL: "https://oauth2.googleapis.com/token",
+		JWKSURL:  "https://www.googleapis.com/oauth2/v3/certs",
+		Scopes:   []string{"openid", "email", "profile"},
+	}, readiness)
+}
+
+func newTestAppWithGoogleAndReadiness(t *testing.T, googleConfig service.GoogleOAuthConfig, readiness func(context.Context) error) http.Handler {
+	t.Helper()
+
 	store := repository.NewMemoryStore()
 	jwtManager, err := security.NewJWTManager("aiops-video-platform", "aiops-api", "")
 	if err != nil {
@@ -291,7 +322,7 @@ func newTestAppWithGoogle(t *testing.T, googleConfig service.GoogleOAuthConfig) 
 	auth := service.NewAuthService(store, jwtManager, 15*time.Minute, 7*24*time.Hour)
 	google := service.NewGoogleOAuthService(store, googleConfig)
 	mux := http.NewServeMux()
-	New(auth, google).RegisterRoutes(mux)
+	New(auth, google, readiness).RegisterRoutes(mux)
 	return observability.RequestContextMiddleware(slog.New(slog.NewTextHandler(io.Discard, nil)), mux)
 }
 

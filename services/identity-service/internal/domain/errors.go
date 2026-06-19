@@ -20,6 +20,7 @@ const (
 	CodeGoogleEmailNotVerified    = "GOOGLE_EMAIL_NOT_VERIFIED"
 	CodeRouteNotFound             = "ROUTE_NOT_FOUND"
 	CodeMethodNotAllowed          = "METHOD_NOT_ALLOWED"
+	CodeServiceNotReady           = "SERVICE_NOT_READY"
 	CodeInternal                  = "INTERNAL_ERROR"
 )
 

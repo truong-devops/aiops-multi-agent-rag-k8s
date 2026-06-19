@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,17 +14,22 @@ import (
 )
 
 type Handler struct {
-	auth   *service.AuthService
-	google *service.GoogleOAuthService
+	auth      *service.AuthService
+	google    *service.GoogleOAuthService
+	readiness func(context.Context) error
 }
 
-func New(auth *service.AuthService, google *service.GoogleOAuthService) *Handler {
-	return &Handler{auth: auth, google: google}
+func New(auth *service.AuthService, google *service.GoogleOAuthService, readiness ...func(context.Context) error) *Handler {
+	ready := func(context.Context) error { return nil }
+	if len(readiness) > 0 && readiness[0] != nil {
+		ready = readiness[0]
+	}
+	return &Handler{auth: auth, google: google, readiness: ready}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", h.text("ok\n"))
-	mux.HandleFunc("/readyz", h.text("ready\n"))
+	mux.HandleFunc("/readyz", h.readyz)
 	mux.HandleFunc("/metrics", h.text("# metrics placeholder\n"))
 	mux.HandleFunc("/.well-known/jwks.json", h.jwks)
 	mux.HandleFunc("/v1/auth/register", h.register)
@@ -34,6 +40,19 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/auth/google/token", h.googleToken)
 	mux.HandleFunc("/v1/users/me", h.currentUser)
 	mux.HandleFunc("/", h.notFound)
+}
+
+func (h *Handler) readyz(w http.ResponseWriter, req *http.Request) {
+	if !requireMethod(w, req, http.MethodGet) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	defer cancel()
+	if err := h.readiness(ctx); err != nil {
+		writeError(w, req, domain.NewError(http.StatusServiceUnavailable, domain.CodeServiceNotReady, "Service is not ready."))
+		return
+	}
+	h.text("ready\n")(w, req)
 }
 
 func (h *Handler) register(w http.ResponseWriter, req *http.Request) {

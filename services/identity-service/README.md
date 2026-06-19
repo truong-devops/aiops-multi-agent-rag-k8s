@@ -4,7 +4,7 @@ Auth service cho nền tảng video/livestream.
 
 Runtime: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine3.23`.
 
-Current implementation runs without external infrastructure by using an in-memory repository. PostgreSQL persistence and Redis-backed session/cache can be added behind the existing repository interfaces later.
+PostgreSQL is the production persistence layer. The in-memory repository is kept only for local development and tests when `DATABASE_URL` is not set.
 
 ## Trách Nhiệm
 
@@ -44,6 +44,7 @@ Public paths should be reached through `api-gateway` as `/api/v1/...`.
 | `JWT_ISSUER` | `aiops-video-platform` | Access token issuer. |
 | `JWT_AUDIENCE` | `aiops-api` | Access token audience. |
 | `SIGNING_KEY_PEM` | generated at startup | RSA private key for stable JWT signing. |
+| `DATABASE_URL` | empty | PostgreSQL connection string. Required outside local/dev/test. |
 | `ACCESS_TOKEN_TTL` | `15m` | JWT access token lifetime. |
 | `REFRESH_TOKEN_TTL` | `168h` | Refresh token/session lifetime. |
 | `GOOGLE_CLIENT_ID` | empty | Google OAuth client ID. |
@@ -54,14 +55,25 @@ Public paths should be reached through `api-gateway` as `/api/v1/...`.
 
 If `SIGNING_KEY_PEM` is not set, the service generates an RSA key on startup. That is fine for local development, but existing access tokens become invalid after restart.
 
-## Dependencies Dự Kiến
+For `production`, `staging`, and other non-local environments, startup fails when `DATABASE_URL` or `SIGNING_KEY_PEM` is missing.
 
-- PostgreSQL persistence behind repository interfaces.
-- Redis for distributed session/cache concerns if needed later.
+## Database
+
+Apply migrations before starting the service:
+
+```bash
+psql "$DATABASE_URL" -f migrations/001_identity_schema.sql
+```
+
+The schema stores users, password credentials, OAuth identities, sessions, refresh-token rotation state, OAuth PKCE state, and authentication audit logs.
+
+## Dependencies
+
+- PostgreSQL via `github.com/jackc/pgx/v5`.
+- Redis can be added later only if distributed cache or rate-limit state becomes necessary.
 
 ## Incident Có Thể Sinh
 
 - Thiếu `DATABASE_URL`.
-- Redis timeout.
 - Sai JWT secret.
 - Connection pool cạn.
