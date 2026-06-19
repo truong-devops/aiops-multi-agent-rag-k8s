@@ -40,7 +40,6 @@ type GoogleOAuthService struct {
 type GoogleStartResult struct {
 	AuthorizationURL string `json:"authorization_url"`
 	State            string `json:"state"`
-	CodeVerifier     string `json:"code_verifier"`
 }
 
 type GoogleTokenInput struct {
@@ -116,7 +115,6 @@ func (s *GoogleOAuthService) Start(ctx context.Context, redirectURI string) (Goo
 	return GoogleStartResult{
 		AuthorizationURL: authURL.String(),
 		State:            state,
-		CodeVerifier:     codeVerifier,
 	}, nil
 }
 
@@ -124,16 +122,19 @@ func (s *GoogleOAuthService) Exchange(ctx context.Context, input GoogleTokenInpu
 	if !s.configured() {
 		return GoogleIdentity{}, domain.NewError(http.StatusServiceUnavailable, domain.CodeGoogleNotConfigured, "Google OAuth is not configured.")
 	}
-	if strings.TrimSpace(input.Code) == "" || strings.TrimSpace(input.State) == "" || strings.TrimSpace(input.CodeVerifier) == "" || strings.TrimSpace(input.RedirectURI) == "" {
-		return GoogleIdentity{}, domain.ValidationError("code, state, code_verifier and redirect_uri are required.")
+	if strings.TrimSpace(input.Code) == "" || strings.TrimSpace(input.State) == "" || strings.TrimSpace(input.RedirectURI) == "" {
+		return GoogleIdentity{}, domain.ValidationError("code, state and redirect_uri are required.")
 	}
 
 	state, err := s.store.ConsumeOAuthState(ctx, input.State, s.now())
-	if err != nil || state.RedirectURI != input.RedirectURI || state.CodeVerifier != input.CodeVerifier {
+	if err != nil || state.RedirectURI != input.RedirectURI {
+		return GoogleIdentity{}, domain.NewError(http.StatusUnauthorized, domain.CodeGoogleStateInvalid, "Google OAuth state is invalid.")
+	}
+	if input.CodeVerifier != "" && state.CodeVerifier != input.CodeVerifier {
 		return GoogleIdentity{}, domain.NewError(http.StatusUnauthorized, domain.CodeGoogleStateInvalid, "Google OAuth state is invalid.")
 	}
 
-	idToken, err := s.exchangeCode(ctx, input.Code, input.CodeVerifier, input.RedirectURI)
+	idToken, err := s.exchangeCode(ctx, input.Code, state.CodeVerifier, input.RedirectURI)
 	if err != nil {
 		return GoogleIdentity{}, domain.NewError(http.StatusBadGateway, domain.CodeGoogleTokenExchangeFailed, "Google token exchange failed.")
 	}

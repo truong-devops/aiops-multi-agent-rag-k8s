@@ -136,15 +136,16 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (AuthResult, 
 
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (RefreshResult, error) {
 	now := s.now()
+	if strings.TrimSpace(refreshToken) == "" {
+		return RefreshResult{}, domain.NewError(http.StatusUnauthorized, domain.CodeInvalidRefreshToken, "Refresh token is invalid.")
+	}
 	tokenHash := security.HashRefreshToken(refreshToken)
 	token, session, user, err := s.store.FindRefreshTokenByHash(ctx, tokenHash)
 	if err != nil {
 		return RefreshResult{}, domain.NewError(http.StatusUnauthorized, domain.CodeInvalidRefreshToken, "Refresh token is invalid.")
 	}
 	if token.Status != domain.RefreshTokenStatusActive {
-		_ = s.store.MarkSessionCompromised(ctx, session.ID, now)
-		_ = s.audit(ctx, domain.AuditLog{UserID: user.ID, SessionID: session.ID, EventType: "auth.refresh_reuse_detected", Success: false, ErrorCode: domain.CodeRefreshTokenReused})
-		return RefreshResult{}, domain.NewError(http.StatusUnauthorized, domain.CodeRefreshTokenReused, "Refresh token was reused.")
+		return RefreshResult{}, s.handleRefreshReuse(ctx, session, user, now)
 	}
 	if session.Status != domain.SessionStatusActive || now.After(session.ExpiresAt) {
 		return RefreshResult{}, domain.NewError(http.StatusUnauthorized, domain.CodeSessionRevoked, "Session is revoked or expired.")
@@ -163,6 +164,9 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (Refresh
 		ExpiresAt: now.Add(s.refreshTokenTTL),
 	}
 	if err := s.store.RotateRefreshToken(ctx, token.ID, newToken, now); err != nil {
+		if errors.Is(err, repository.ErrRefreshTokenNotActive) {
+			return RefreshResult{}, s.handleRefreshReuse(ctx, session, user, now)
+		}
 		return RefreshResult{}, err
 	}
 
@@ -205,6 +209,10 @@ func (s *AuthService) Authenticate(ctx context.Context, authorizationHeader stri
 	claims, err := s.jwt.VerifyAccessToken(token, s.now())
 	if err != nil {
 		return domain.User{}, security.AccessTokenClaims{}, domain.Unauthorized("Access token is invalid.")
+	}
+	session, err := s.store.FindSessionByID(ctx, claims.SessionID)
+	if err != nil || session.Status != domain.SessionStatusActive || session.UserID != claims.Subject || s.now().After(session.ExpiresAt) {
+		return domain.User{}, security.AccessTokenClaims{}, domain.Unauthorized("Session is not active.")
 	}
 	user, err := s.store.FindUserByID(ctx, claims.Subject)
 	if err != nil || user.Status != domain.UserStatusActive {
@@ -286,6 +294,18 @@ func (s *AuthService) issueTokenPair(ctx context.Context, user domain.User, user
 		ExpiresIn:    int64(s.accessTokenTTL.Seconds()),
 		User:         user,
 	}, session.ID, nil
+}
+
+func (s *AuthService) handleRefreshReuse(ctx context.Context, session domain.Session, user domain.User, now time.Time) error {
+	_ = s.store.MarkSessionCompromised(ctx, session.ID, now)
+	_ = s.audit(ctx, domain.AuditLog{
+		UserID:    user.ID,
+		SessionID: session.ID,
+		EventType: "auth.refresh_reuse_detected",
+		Success:   false,
+		ErrorCode: domain.CodeRefreshTokenReused,
+	})
+	return domain.NewError(http.StatusUnauthorized, domain.CodeRefreshTokenReused, "Refresh token was reused.")
 }
 
 func (s *AuthService) audit(ctx context.Context, log domain.AuditLog) error {

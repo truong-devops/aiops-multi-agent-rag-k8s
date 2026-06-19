@@ -14,6 +14,7 @@ var (
 	ErrNotFound              = errors.New("not found")
 	ErrEmailAlreadyExists    = errors.New("email already exists")
 	ErrUsernameAlreadyExists = errors.New("username already exists")
+	ErrRefreshTokenNotActive = errors.New("refresh token is not active")
 )
 
 type UserRepository interface {
@@ -26,6 +27,7 @@ type UserRepository interface {
 
 type SessionRepository interface {
 	CreateSession(ctx context.Context, session domain.Session, refreshToken domain.RefreshToken) error
+	FindSessionByID(ctx context.Context, sessionID string) (domain.Session, error)
 	FindRefreshTokenByHash(ctx context.Context, tokenHash string) (domain.RefreshToken, domain.Session, domain.User, error)
 	RotateRefreshToken(ctx context.Context, oldTokenID string, newToken domain.RefreshToken, now time.Time) error
 	RevokeSession(ctx context.Context, sessionID string, now time.Time) error
@@ -192,6 +194,17 @@ func (s *MemoryStore) CreateSession(_ context.Context, session domain.Session, r
 	return nil
 }
 
+func (s *MemoryStore) FindSessionByID(_ context.Context, sessionID string) (domain.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	session, exists := s.sessionsByID[sessionID]
+	if !exists {
+		return domain.Session{}, ErrNotFound
+	}
+	return session, nil
+}
+
 func (s *MemoryStore) FindRefreshTokenByHash(_ context.Context, tokenHash string) (domain.RefreshToken, domain.Session, domain.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -220,12 +233,21 @@ func (s *MemoryStore) RotateRefreshToken(_ context.Context, oldTokenID string, n
 	if !exists {
 		return ErrNotFound
 	}
+	if oldToken.Status != domain.RefreshTokenStatusActive {
+		return ErrRefreshTokenNotActive
+	}
+	session, exists := s.sessionsByID[oldToken.SessionID]
+	if !exists {
+		return ErrNotFound
+	}
+	if session.Status != domain.SessionStatusActive || now.After(session.ExpiresAt) {
+		return ErrRefreshTokenNotActive
+	}
 	oldToken.Status = domain.RefreshTokenStatusUsed
 	oldToken.UsedAt = &now
 	oldToken.ReplacedBy = newToken.ID
 	s.refreshTokensByID[oldTokenID] = oldToken
 
-	session := s.sessionsByID[oldToken.SessionID]
 	session.LastSeenAt = now
 	s.sessionsByID[session.ID] = session
 
@@ -268,6 +290,15 @@ func (s *MemoryStore) MarkSessionCompromised(_ context.Context, sessionID string
 	session.Status = domain.SessionStatusCompromised
 	session.RevokedAt = &now
 	s.sessionsByID[sessionID] = session
+
+	for tokenID, token := range s.refreshTokensByID {
+		if token.SessionID != sessionID || token.Status != domain.RefreshTokenStatusActive {
+			continue
+		}
+		token.Status = domain.RefreshTokenStatusRevoked
+		token.RevokedAt = &now
+		s.refreshTokensByID[tokenID] = token
+	}
 	return nil
 }
 
