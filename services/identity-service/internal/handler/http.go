@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -37,6 +39,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/auth/refresh", h.refresh)
 	mux.HandleFunc("/v1/auth/logout", h.logout)
 	mux.HandleFunc("/v1/auth/google/start", h.googleStart)
+	mux.HandleFunc("/v1/auth/google/callback", h.googleCallback)
 	mux.HandleFunc("/v1/auth/google/token", h.googleToken)
 	mux.HandleFunc("/v1/users/me", h.currentUser)
 	mux.HandleFunc("/", h.notFound)
@@ -192,6 +195,38 @@ func (h *Handler) googleStart(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, req, http.StatusOK, result)
 }
 
+func (h *Handler) googleCallback(w http.ResponseWriter, req *http.Request) {
+	if !requireMethod(w, req, http.MethodGet) {
+		return
+	}
+	redirectURI := strings.TrimSpace(req.URL.Query().Get("redirect_uri"))
+	if redirectURI == "" {
+		redirectURI = callbackRedirectURI(req)
+	}
+	identity, err := h.google.Exchange(req.Context(), service.GoogleTokenInput{
+		Code:        req.URL.Query().Get("code"),
+		State:       req.URL.Query().Get("state"),
+		RedirectURI: redirectURI,
+		IPAddress:   clientIP(req),
+		UserAgent:   req.UserAgent(),
+	})
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	user, err := h.google.UpsertIdentity(req.Context(), identity)
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	result, err := h.auth.IssueForOAuthUser(req.Context(), user, req.UserAgent(), clientIP(req))
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	writeJSON(w, req, http.StatusOK, authResultResponse(result))
+}
+
 func (h *Handler) googleToken(w http.ResponseWriter, req *http.Request) {
 	if !requireMethod(w, req, http.MethodPost) {
 		return
@@ -259,6 +294,10 @@ func decodeJSON(w http.ResponseWriter, req *http.Request, out any) bool {
 		writeError(w, req, domain.ValidationError("Request body must be valid JSON."))
 		return false
 	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, req, domain.ValidationError("Request body must contain a single JSON object."))
+		return false
+	}
 	return true
 }
 
@@ -304,9 +343,46 @@ func methodNotAllowed(w http.ResponseWriter, req *http.Request) {
 
 func clientIP(req *http.Request) string {
 	if forwardedFor := req.Header.Get("X-Forwarded-For"); forwardedFor != "" {
-		return strings.TrimSpace(strings.Split(forwardedFor, ",")[0])
+		if ip := cleanIP(strings.Split(forwardedFor, ",")[0]); ip != "" {
+			return ip
+		}
 	}
-	return req.RemoteAddr
+	if realIP := cleanIP(req.Header.Get("X-Real-IP")); realIP != "" {
+		return realIP
+	}
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err == nil {
+		if ip := cleanIP(host); ip != "" {
+			return ip
+		}
+	}
+	if ip := cleanIP(req.RemoteAddr); ip != "" {
+		return ip
+	}
+	return "unknown"
+}
+
+func cleanIP(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if parsed := net.ParseIP(value); parsed != nil {
+		return parsed.String()
+	}
+	return ""
+}
+
+func callbackRedirectURI(req *http.Request) string {
+	scheme := strings.TrimSpace(req.Header.Get("X-Forwarded-Proto"))
+	if scheme == "" {
+		scheme = "http"
+	}
+	host := strings.TrimSpace(req.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = req.Host
+	}
+	return scheme + "://" + host + req.URL.Path
 }
 
 func authResultResponse(result service.AuthResult) map[string]any {

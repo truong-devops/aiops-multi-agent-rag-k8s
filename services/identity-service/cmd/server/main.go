@@ -13,6 +13,7 @@ import (
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/config"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/handler"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/observability"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/ratelimit"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/repository"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/security"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/service"
@@ -43,7 +44,25 @@ func main() {
 	}
 	defer closeStore()
 
-	authService := service.NewAuthService(store, jwtManager, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
+	limiter, limiterReadiness, closeLimiter, err := openRateLimiter(context.Background(), cfg, logger)
+	if err != nil {
+		logger.Error("failed to initialize identity rate limiter", "service", serviceName, "error", err)
+		os.Exit(1)
+	}
+	defer closeLimiter()
+
+	authService := service.NewAuthServiceWithOptions(
+		store,
+		jwtManager,
+		cfg.AccessTokenTTL,
+		cfg.RefreshTokenTTL,
+		service.WithRateLimiter(limiter, service.RateLimitConfig{
+			LoginLimit:     cfg.LoginRateLimit,
+			LoginWindow:    cfg.LoginRateLimitWindow,
+			RegisterLimit:  cfg.RegisterRateLimit,
+			RegisterWindow: cfg.RegisterRateLimitWindow,
+		}),
+	)
 	googleService := service.NewGoogleOAuthService(store, service.GoogleOAuthConfig{
 		ClientID:     cfg.GoogleClientID,
 		ClientSecret: cfg.GoogleClientSecret,
@@ -54,7 +73,7 @@ func main() {
 	})
 
 	mux := http.NewServeMux()
-	handler.New(authService, googleService, readiness).RegisterRoutes(mux)
+	handler.New(authService, googleService, combineReadiness(readiness, limiterReadiness)).RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -99,4 +118,37 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger) (rep
 
 	logger.Warn("using in-memory identity store; this is only suitable for local development", "service", serviceName, "environment", cfg.Environment)
 	return repository.NewMemoryStore(), func(context.Context) error { return nil }, func() {}, nil
+}
+
+func openRateLimiter(ctx context.Context, cfg config.Config, logger *slog.Logger) (ratelimit.Limiter, func(context.Context) error, func(), error) {
+	if cfg.UseRedis() {
+		limiter, err := ratelimit.NewRedisLimiter(ctx, cfg.RedisURL, "identity")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		logger.Info("using redis identity rate limiter", "service", serviceName)
+		return limiter, limiter.Ping, func() {
+			if err := limiter.Close(); err != nil {
+				logger.Error("failed to close identity rate limiter", "service", serviceName, "error", err)
+			}
+		}, nil
+	}
+
+	logger.Warn("using no-op identity rate limiter; this is only suitable for local development", "service", serviceName, "environment", cfg.Environment)
+	return ratelimit.NoopLimiter{}, func(context.Context) error { return nil }, func() {}, nil
+}
+
+func combineReadiness(checks ...func(context.Context) error) func(context.Context) error {
+	return func(ctx context.Context) error {
+		var combined error
+		for _, check := range checks {
+			if check == nil {
+				continue
+			}
+			if err := check(ctx); err != nil {
+				combined = errors.Join(combined, err)
+			}
+		}
+		return combined
+	}
 }

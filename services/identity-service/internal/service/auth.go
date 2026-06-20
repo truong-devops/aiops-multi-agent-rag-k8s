@@ -2,13 +2,17 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/mail"
 	"strings"
 	"time"
 
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/domain"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/ratelimit"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/repository"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/security"
 )
@@ -16,9 +20,20 @@ import (
 type AuthService struct {
 	store           repository.Store
 	jwt             *security.JWTManager
+	limiter         ratelimit.Limiter
+	rateLimits      RateLimitConfig
 	accessTokenTTL  time.Duration
 	refreshTokenTTL time.Duration
 	now             func() time.Time
+}
+
+type AuthOption func(*AuthService)
+
+type RateLimitConfig struct {
+	LoginLimit     int64
+	LoginWindow    time.Duration
+	RegisterLimit  int64
+	RegisterWindow time.Duration
 }
 
 type RegisterInput struct {
@@ -53,16 +68,67 @@ type RefreshResult struct {
 }
 
 func NewAuthService(store repository.Store, jwt *security.JWTManager, accessTTL time.Duration, refreshTTL time.Duration) *AuthService {
-	return &AuthService{
+	return NewAuthServiceWithOptions(store, jwt, accessTTL, refreshTTL)
+}
+
+func NewAuthServiceWithOptions(store repository.Store, jwt *security.JWTManager, accessTTL time.Duration, refreshTTL time.Duration, options ...AuthOption) *AuthService {
+	auth := &AuthService{
 		store:           store,
 		jwt:             jwt,
+		limiter:         ratelimit.NoopLimiter{},
+		rateLimits:      DefaultRateLimitConfig(),
 		accessTokenTTL:  accessTTL,
 		refreshTokenTTL: refreshTTL,
 		now:             func() time.Time { return time.Now().UTC() },
 	}
+	for _, option := range options {
+		option(auth)
+	}
+	if auth.limiter == nil {
+		auth.limiter = ratelimit.NoopLimiter{}
+	}
+	return auth
+}
+
+func WithRateLimiter(limiter ratelimit.Limiter, cfg RateLimitConfig) AuthOption {
+	return func(s *AuthService) {
+		if limiter != nil {
+			s.limiter = limiter
+		}
+		s.rateLimits = cfg.withDefaults()
+	}
+}
+
+func DefaultRateLimitConfig() RateLimitConfig {
+	return RateLimitConfig{
+		LoginLimit:     5,
+		LoginWindow:    15 * time.Minute,
+		RegisterLimit:  10,
+		RegisterWindow: 15 * time.Minute,
+	}
+}
+
+func (cfg RateLimitConfig) withDefaults() RateLimitConfig {
+	defaults := DefaultRateLimitConfig()
+	if cfg.LoginLimit <= 0 {
+		cfg.LoginLimit = defaults.LoginLimit
+	}
+	if cfg.LoginWindow <= 0 {
+		cfg.LoginWindow = defaults.LoginWindow
+	}
+	if cfg.RegisterLimit <= 0 {
+		cfg.RegisterLimit = defaults.RegisterLimit
+	}
+	if cfg.RegisterWindow <= 0 {
+		cfg.RegisterWindow = defaults.RegisterWindow
+	}
+	return cfg
 }
 
 func (s *AuthService) Register(ctx context.Context, input RegisterInput) (domain.User, error) {
+	if err := s.enforceRegisterLimit(ctx, input.IPAddress); err != nil {
+		return domain.User{}, err
+	}
 	email, err := normalizeEmail(input.Email)
 	if err != nil {
 		return domain.User{}, err
@@ -116,6 +182,9 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (domain
 }
 
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (AuthResult, error) {
+	if err := s.enforceLoginLimit(ctx, input.Email, input.IPAddress); err != nil {
+		return AuthResult{}, err
+	}
 	user, credential, err := s.store.FindUserByEmail(ctx, input.Email)
 	if err != nil || !security.VerifyPassword(input.Password, credential.PasswordHash) {
 		_ = s.audit(ctx, domain.AuditLog{EventType: "auth.login_failed", IPAddress: input.IPAddress, UserAgent: input.UserAgent, Success: false, ErrorCode: domain.CodeInvalidCredentials})
@@ -312,6 +381,40 @@ func (s *AuthService) audit(ctx context.Context, log domain.AuditLog) error {
 	log.ID = domain.NewID("aud")
 	log.CreatedAt = s.now()
 	return s.store.WriteAuditLog(ctx, log)
+}
+
+func (s *AuthService) enforceRegisterLimit(ctx context.Context, ipAddress string) error {
+	return s.enforceLimit(ctx, "rl:register:"+stableHash(ipAddress), s.rateLimits.RegisterLimit, s.rateLimits.RegisterWindow)
+}
+
+func (s *AuthService) enforceLoginLimit(ctx context.Context, email string, ipAddress string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	key := "rl:login:" + stableHash(email) + ":" + stableHash(ipAddress)
+	return s.enforceLimit(ctx, key, s.rateLimits.LoginLimit, s.rateLimits.LoginWindow)
+}
+
+func (s *AuthService) enforceLimit(ctx context.Context, key string, limit int64, window time.Duration) error {
+	decision, err := s.limiter.Allow(ctx, key, limit, window)
+	if err != nil {
+		return domain.NewError(http.StatusServiceUnavailable, domain.CodeServiceNotReady, "Rate limiter is not available.")
+	}
+	if decision.Allowed {
+		return nil
+	}
+	retrySeconds := int64(decision.RetryAfter.Seconds())
+	if retrySeconds < 1 {
+		retrySeconds = 1
+	}
+	return domain.NewError(http.StatusTooManyRequests, domain.CodeRateLimited, fmt.Sprintf("Too many requests. Try again in %d seconds.", retrySeconds))
+}
+
+func stableHash(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		value = "unknown"
+	}
+	sum := sha256.Sum256([]byte(value))
+	return base64.RawURLEncoding.EncodeToString(sum[:12])
 }
 
 func normalizeEmail(email string) (string, error) {

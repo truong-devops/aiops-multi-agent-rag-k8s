@@ -10,7 +10,7 @@ func TestValidateAllowsLocalWithoutExternalSecrets(t *testing.T) {
 	}
 }
 
-func TestValidateRequiresProductionDatabaseURLAndSigningKey(t *testing.T) {
+func TestValidateRequiresProductionDatabaseRedisAndSigningKey(t *testing.T) {
 	cfg := Config{Environment: "production"}
 
 	if err := cfg.Validate(); err == nil {
@@ -23,7 +23,37 @@ func TestValidateRequiresProductionDatabaseURLAndSigningKey(t *testing.T) {
 	}
 
 	cfg.SigningKeyPEM = "-----BEGIN RSA PRIVATE KEY-----\nplaceholder\n-----END RSA PRIVATE KEY-----"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing REDIS_URL error")
+	}
+
+	cfg.RedisURL = "redis://redis:6379/0"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateAcceptsStagingWithRequiredExternalConfig(t *testing.T) {
+	cfg := Config{
+		Environment:   "staging",
+		DatabaseURL:   "postgres://identity:identity@postgres:5432/identity?sslmode=disable",
+		SigningKeyPEM: "-----BEGIN RSA PRIVATE KEY-----\nplaceholder\n-----END RSA PRIVATE KEY-----",
+		RedisURL:      "redis://redis:6379/0",
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateRejectsStagingWithoutSigningKey(t *testing.T) {
+	cfg := Config{
+		Environment: "staging",
+		DatabaseURL: "postgres://identity:identity@postgres:5432/identity?sslmode=disable",
+		RedisURL:    "redis://redis:6379/0",
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing SIGNING_KEY_PEM error")
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/observability"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/ratelimit"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/repository"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/security"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/service"
@@ -270,6 +271,66 @@ func TestIdentityReadinessFailureReturnsServiceUnavailable(t *testing.T) {
 	assertErrorCode(t, resp.Body.Bytes(), "SERVICE_NOT_READY")
 }
 
+func TestIdentityRateLimitReturnsTooManyRequests(t *testing.T) {
+	app := newTestAppWithAuthOptions(t, service.WithRateLimiter(alwaysDenyLimiter{}, service.RateLimitConfig{
+		RegisterLimit:  1,
+		RegisterWindow: time.Minute,
+		LoginLimit:     1,
+		LoginWindow:    time.Minute,
+	}))
+
+	resp := doJSON(t, app, http.MethodPost, "/v1/auth/register", map[string]any{
+		"email":    "limited@example.com",
+		"password": "strong-password",
+	}, "")
+	if resp.Code != http.StatusTooManyRequests {
+		t.Fatalf("rate limited register status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	assertErrorCode(t, resp.Body.Bytes(), "RATE_LIMITED")
+}
+
+func TestIdentityRateLimiterErrorReturnsServiceUnavailable(t *testing.T) {
+	app := newTestAppWithAuthOptions(t, service.WithRateLimiter(errorLimiter{}, service.RateLimitConfig{
+		RegisterLimit:  1,
+		RegisterWindow: time.Minute,
+		LoginLimit:     1,
+		LoginWindow:    time.Minute,
+	}))
+
+	resp := doJSON(t, app, http.MethodPost, "/v1/auth/login", map[string]any{
+		"email":    "limited@example.com",
+		"password": "strong-password",
+	}, "")
+	if resp.Code != http.StatusServiceUnavailable {
+		t.Fatalf("rate limiter error status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	assertErrorCode(t, resp.Body.Bytes(), "SERVICE_NOT_READY")
+}
+
+func TestIdentityRejectsTrailingJSON(t *testing.T) {
+	app := newTestApp(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/register", strings.NewReader(`{"email":"bad@example.com","password":"strong-password"} {}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("trailing json status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	assertErrorCode(t, rec.Body.Bytes(), "VALIDATION_ERROR")
+}
+
+func TestClientIPPrefersForwardedHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.RemoteAddr = "10.0.0.9:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.9")
+
+	if got := clientIP(req); got != "203.0.113.10" {
+		t.Fatalf("clientIP() = %q, want forwarded client IP", got)
+	}
+}
+
 func newTestApp(t *testing.T) http.Handler {
 	t.Helper()
 
@@ -297,13 +358,13 @@ func newTestAppWithGoogleConfig(t *testing.T) http.Handler {
 func newTestAppWithGoogle(t *testing.T, googleConfig service.GoogleOAuthConfig) http.Handler {
 	t.Helper()
 
-	return newTestAppWithGoogleAndReadiness(t, googleConfig, nil)
+	return newTestAppWithGoogleReadinessAndOptions(t, googleConfig, nil)
 }
 
 func newTestAppWithReadiness(t *testing.T, readiness func(context.Context) error) http.Handler {
 	t.Helper()
 
-	return newTestAppWithGoogleAndReadiness(t, service.GoogleOAuthConfig{
+	return newTestAppWithGoogleReadinessAndOptions(t, service.GoogleOAuthConfig{
 		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
 		TokenURL: "https://oauth2.googleapis.com/token",
 		JWKSURL:  "https://www.googleapis.com/oauth2/v3/certs",
@@ -311,7 +372,18 @@ func newTestAppWithReadiness(t *testing.T, readiness func(context.Context) error
 	}, readiness)
 }
 
-func newTestAppWithGoogleAndReadiness(t *testing.T, googleConfig service.GoogleOAuthConfig, readiness func(context.Context) error) http.Handler {
+func newTestAppWithAuthOptions(t *testing.T, options ...service.AuthOption) http.Handler {
+	t.Helper()
+
+	return newTestAppWithGoogleReadinessAndOptions(t, service.GoogleOAuthConfig{
+		AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL: "https://oauth2.googleapis.com/token",
+		JWKSURL:  "https://www.googleapis.com/oauth2/v3/certs",
+		Scopes:   []string{"openid", "email", "profile"},
+	}, nil, options...)
+}
+
+func newTestAppWithGoogleReadinessAndOptions(t *testing.T, googleConfig service.GoogleOAuthConfig, readiness func(context.Context) error, options ...service.AuthOption) http.Handler {
 	t.Helper()
 
 	store := repository.NewMemoryStore()
@@ -319,7 +391,7 @@ func newTestAppWithGoogleAndReadiness(t *testing.T, googleConfig service.GoogleO
 	if err != nil {
 		t.Fatalf("NewJWTManager() error = %v", err)
 	}
-	auth := service.NewAuthService(store, jwtManager, 15*time.Minute, 7*24*time.Hour)
+	auth := service.NewAuthServiceWithOptions(store, jwtManager, 15*time.Minute, 7*24*time.Hour, options...)
 	google := service.NewGoogleOAuthService(store, googleConfig)
 	mux := http.NewServeMux()
 	New(auth, google, readiness).RegisterRoutes(mux)
@@ -396,4 +468,21 @@ func assertArrayNotEmpty(t *testing.T, body []byte, path string) {
 	if !ok || len(value) == 0 {
 		t.Fatalf("%s is empty or not array in body %s", path, string(body))
 	}
+}
+
+type alwaysDenyLimiter struct{}
+
+func (alwaysDenyLimiter) Allow(context.Context, string, int64, time.Duration) (ratelimit.Decision, error) {
+	return ratelimit.Decision{
+		Allowed:    false,
+		Limit:      1,
+		Remaining:  0,
+		RetryAfter: time.Minute,
+	}, nil
+}
+
+type errorLimiter struct{}
+
+func (errorLimiter) Allow(context.Context, string, int64, time.Duration) (ratelimit.Decision, error) {
+	return ratelimit.Decision{}, errors.New("redis unavailable")
 }

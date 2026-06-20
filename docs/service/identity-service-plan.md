@@ -362,6 +362,17 @@ auth.logout
 auth.refresh_reuse_detected
 ```
 
+### Redis ephemeral keys
+
+PostgreSQL remains the source of truth. Redis is only for short-lived protection state.
+
+```text
+identity:rl:login:{email_hash}:{ip_hash}      TTL 15m
+identity:rl:register:{ip_hash}                TTL 15m
+```
+
+Do not store raw email, raw IP, JWT, refresh token, OAuth code or password in Redis.
+
 ## 7. API design
 
 ### Password auth
@@ -458,7 +469,7 @@ GOOGLE_EMAIL_NOT_VERIFIED
 - JWT private key must not be shared with other services.
 - JWT verification should use public JWKS.
 - Login failures should use generic error messages.
-- Rate limit login/register/refresh endpoints at gateway level.
+- Rate limit login/register in `identity-service` with Redis; gateway can add edge rate limits as defense in depth.
 - Do not log passwords, tokens, authorization codes or presigned URLs.
 
 ## 10. Observability requirements
@@ -542,6 +553,7 @@ Example:
 - Error response middleware.
 - Request ID middleware.
 - PostgreSQL connection.
+- Redis connection for auth rate limiting.
 - Migration runner or migration command.
 
 ### Step 2 — User registration

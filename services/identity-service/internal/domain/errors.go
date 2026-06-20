@@ -10,6 +10,7 @@ const (
 	CodeInvalidCredentials        = "INVALID_CREDENTIALS"
 	CodeUserDisabled              = "USER_DISABLED"
 	CodeUnauthorized              = "UNAUTHORIZED"
+	CodeRateLimited               = "RATE_LIMITED"
 	CodeInvalidRefreshToken       = "INVALID_REFRESH_TOKEN"
 	CodeRefreshTokenReused        = "REFRESH_TOKEN_REUSED"
 	CodeSessionRevoked            = "SESSION_REVOKED"
