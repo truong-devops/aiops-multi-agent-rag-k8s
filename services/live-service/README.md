@@ -13,8 +13,9 @@ Runtime: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine
 
 ## Dependencies Dự Kiến
 
-- PostgreSQL.
-- Redis.
+- PostgreSQL for live sessions, stream keys and live events.
+- Redis for live heartbeat, viewer count and stream state cache.
+- MongoDB later only if live chat messages are implemented.
 - MediaMTX.
 
 ## Incident Có Thể Sinh

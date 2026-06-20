@@ -17,7 +17,8 @@ Runtime: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine
 
 - Redpanda/Kafka.
 - MinIO.
-- PostgreSQL.
+- PostgreSQL for processing jobs, attempts and dead letters.
+- Redis for distributed job locks and idempotency keys.
 - FFmpeg.
 
 ## Incident Có Thể Sinh

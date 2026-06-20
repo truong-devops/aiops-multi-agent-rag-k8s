@@ -2,6 +2,8 @@
 
 Data ownership prevents hidden coupling between services. A service may expose APIs/events for its data, but other services should not read or write its database tables directly.
 
+Database choices and field-level schemas are defined in [Database Design](./database-design.md). This file defines ownership; the database design file defines how that ownership maps to PostgreSQL, MongoDB and Redis.
+
 ## Ownership Map
 
 | Data | Owner | Notes |

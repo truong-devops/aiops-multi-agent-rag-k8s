@@ -14,7 +14,8 @@ Runtime: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine
 
 ## Dependencies Dự Kiến
 
-- PostgreSQL.
+- PostgreSQL for video metadata, upload requests, assets and outbox events.
+- Redis for short-lived upload intent cache and idempotency keys.
 - MinIO.
 - Redpanda/Kafka.
 

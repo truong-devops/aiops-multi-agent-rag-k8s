@@ -37,6 +37,8 @@ aiops-service/
 
 ## Dependencies Dự Kiến
 
+- MongoDB for incidents, evidence items, RCA reports, agent runs and runbook chunks.
+- Redis for analysis locks, collector cache and progress cache.
 - Kubernetes API.
 - Loki.
 - Prometheus.

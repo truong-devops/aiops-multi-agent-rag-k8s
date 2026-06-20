@@ -12,8 +12,9 @@ Runtime: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine
 
 ## Dependencies Dự Kiến
 
-- PostgreSQL.
-- Redis.
+- PostgreSQL for likes, follows and durable social counters.
+- MongoDB for comments and denormalized feed read models.
+- Redis for feed cache, hot counters and short-lived dedup keys.
 
 ## Incident Có Thể Sinh
 

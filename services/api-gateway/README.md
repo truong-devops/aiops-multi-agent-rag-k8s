@@ -23,3 +23,8 @@ Planned responsibilities:
 - Internal user context forwarding.
 
 The gateway should not own business data or implement product business logic.
+
+## Storage
+
+- No durable database.
+- Redis is used for rate limiting, JWKS cache and short-lived upstream health cache when those features are enabled.
