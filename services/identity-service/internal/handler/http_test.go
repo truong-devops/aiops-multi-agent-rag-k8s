@@ -209,6 +209,19 @@ func TestIdentityInvalidLoginAndUnauthorizedProfile(t *testing.T) {
 	assertErrorCode(t, meResp.Body.Bytes(), "UNAUTHORIZED")
 }
 
+func TestIdentityRejectsTooLongPassword(t *testing.T) {
+	app := newTestApp(t)
+
+	resp := doJSON(t, app, http.MethodPost, "/v1/auth/register", map[string]any{
+		"email":    "long-password@example.com",
+		"password": strings.Repeat("a", 129),
+	}, "")
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("too long password status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	assertErrorCode(t, resp.Body.Bytes(), "WEAK_PASSWORD")
+}
+
 func TestIdentityJWKSAndGoogleNotConfigured(t *testing.T) {
 	app := newTestApp(t)
 

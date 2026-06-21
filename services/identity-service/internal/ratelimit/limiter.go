@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +31,17 @@ func (NoopLimiter) Allow(_ context.Context, _ string, limit int64, _ time.Durati
 type RedisLimiter struct {
 	client *redis.Client
 	prefix string
+	script *redis.Script
 }
+
+var allowScript = redis.NewScript(`
+local current = redis.call("INCR", KEYS[1])
+if current == 1 then
+  redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+local ttl = redis.call("PTTL", KEYS[1])
+return {current, ttl}
+`)
 
 func NewRedisLimiter(ctx context.Context, redisURL string, prefix string) (*RedisLimiter, error) {
 	redisURL = strings.TrimSpace(redisURL)
@@ -55,7 +66,7 @@ func NewRedisLimiter(ctx context.Context, redisURL string, prefix string) (*Redi
 	if prefix == "" {
 		prefix = "identity"
 	}
-	return &RedisLimiter{client: client, prefix: prefix}, nil
+	return &RedisLimiter{client: client, prefix: prefix, script: allowScript}, nil
 }
 
 func (l *RedisLimiter) Allow(ctx context.Context, key string, limit int64, window time.Duration) (Decision, error) {
@@ -63,22 +74,27 @@ func (l *RedisLimiter) Allow(ctx context.Context, key string, limit int64, windo
 		return Decision{Allowed: true, Limit: limit, Remaining: limit}, nil
 	}
 	fullKey := l.fullKey(key)
-	count, err := l.client.Incr(ctx, fullKey).Result()
+	windowMs := int64(window / time.Millisecond)
+	if windowMs < 1 {
+		windowMs = 1
+	}
+	result, err := l.script.Run(ctx, l.client, []string{fullKey}, windowMs).Slice()
 	if err != nil {
 		return Decision{}, err
 	}
-	if count == 1 {
-		if err := l.client.Expire(ctx, fullKey, window).Err(); err != nil {
-			return Decision{}, err
-		}
+	if len(result) != 2 {
+		return Decision{}, fmt.Errorf("unexpected redis rate limit result length %d", len(result))
 	}
-	ttl, err := l.client.TTL(ctx, fullKey).Result()
+	count, err := redisInt64(result[0])
 	if err != nil {
-		return Decision{}, err
+		return Decision{}, fmt.Errorf("decode redis rate limit count: %w", err)
 	}
-	if ttl < 0 {
-		ttl = window
-		_ = l.client.Expire(ctx, fullKey, window).Err()
+	ttlMs, err := redisInt64(result[1])
+	if err != nil {
+		return Decision{}, fmt.Errorf("decode redis rate limit ttl: %w", err)
+	}
+	if ttlMs < 0 {
+		ttlMs = windowMs
 	}
 
 	remaining := limit - count
@@ -89,7 +105,7 @@ func (l *RedisLimiter) Allow(ctx context.Context, key string, limit int64, windo
 		Allowed:    count <= limit,
 		Limit:      limit,
 		Remaining:  remaining,
-		RetryAfter: ttl,
+		RetryAfter: time.Duration(ttlMs) * time.Millisecond,
 	}, nil
 }
 
@@ -107,4 +123,21 @@ func (l *RedisLimiter) fullKey(key string) string {
 		key = "unknown"
 	}
 	return l.prefix + ":" + key
+}
+
+func redisInt64(value any) (int64, error) {
+	switch typed := value.(type) {
+	case int64:
+		return typed, nil
+	case int:
+		return int64(typed), nil
+	case string:
+		parsed, err := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("unexpected type %T", value)
+	}
 }

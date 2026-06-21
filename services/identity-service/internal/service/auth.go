@@ -17,6 +17,11 @@ import (
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/identity-service/internal/security"
 )
 
+const (
+	minPasswordLength = 8
+	maxPasswordLength = 128
+)
+
 type AuthService struct {
 	store           repository.Store
 	jwt             *security.JWTManager
@@ -135,8 +140,11 @@ func (s *AuthService) Register(ctx context.Context, input RegisterInput) (domain
 	}
 	username := normalizeUsername(input.Username)
 	displayName := strings.TrimSpace(input.DisplayName)
-	if len(input.Password) < 8 {
+	if len(input.Password) < minPasswordLength {
 		return domain.User{}, domain.NewError(http.StatusBadRequest, domain.CodeWeakPassword, "Password must be at least 8 characters.")
+	}
+	if len(input.Password) > maxPasswordLength {
+		return domain.User{}, domain.NewError(http.StatusBadRequest, domain.CodeWeakPassword, "Password must be at most 128 characters.")
 	}
 
 	now := s.now()
@@ -230,7 +238,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (Refresh
 		TokenHash: security.HashRefreshToken(newRawToken),
 		Status:    domain.RefreshTokenStatusActive,
 		CreatedAt: now,
-		ExpiresAt: now.Add(s.refreshTokenTTL),
+		ExpiresAt: session.ExpiresAt,
 	}
 	if err := s.store.RotateRefreshToken(ctx, token.ID, newToken, now); err != nil {
 		if errors.Is(err, repository.ErrRefreshTokenNotActive) {
