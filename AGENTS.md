@@ -2,7 +2,9 @@
 
 This file defines the working rules for coding agents contributing to this repository.
 
-When a user asks an agent to code in this repo, the agent should read this file first and follow it unless the user explicitly asks to do otherwise.
+When a user asks an agent to code in this repo, the agent must read this file first and follow it unless the user explicitly asks to do otherwise.
+
+The default standard for code in this repository is production-oriented engineering. Do not treat work as throwaway demo code. Even when a feature is small, organize it so it can grow, be tested, be observed, and be deployed to a real Kubernetes environment.
 
 ## 1. Project Purpose
 
@@ -26,12 +28,15 @@ Agents must preserve this priority. Product work is important, but the app is no
 
 When choosing between multiple useful changes, use this order of priority:
 
-1. Protect the thesis focus: incident analysis, evidence collection, RCA quality, evaluation readiness.
-2. Keep the core product flow usable enough to generate realistic incidents.
-3. Prefer changes that improve observability, traceability, reproducibility, and safety.
-4. Avoid broad feature expansion that does not clearly support the thesis goals.
+1. Build production-shaped code: clear boundaries, explicit contracts, testable logic, observable runtime behavior, and deployable configuration.
+2. Protect the thesis focus: incident analysis, evidence collection, RCA quality, evaluation readiness.
+3. Keep the core product flow usable enough to generate realistic incidents.
+4. Prefer changes that improve observability, traceability, reproducibility, and safety.
+5. Avoid broad feature expansion that does not clearly support the thesis goals.
 
 If a task is ambiguous, prefer the option that strengthens the AIOps, RAG, or DevSecOps story.
+
+If a fast shortcut would make the service harder to deploy, test, debug, or extend, do not take it unless the user explicitly asks for a temporary spike.
 
 ## 3. Required Reading Order
 
@@ -39,15 +44,24 @@ Before making substantial changes, agents should read the relevant docs instead 
 
 Suggested reading order:
 
-1. `README.md`
-2. `docs/architecture/product-design.md`
-3. `docs/architecture/service-boundaries.md`
-4. `docs/architecture/database-design.md`
-5. `docs/api/rest-api-design.md`
-6. `docs/development/dependency-versioning.md`
-7. Service-specific README and plan docs when working inside a service
+1. `PROJECT_CONTEXT.md`
+2. `PROJECT_PROGRESS.md`
+3. `README.md`
+4. `docs/architecture/product-design.md`
+5. `docs/architecture/service-boundaries.md`
+6. `docs/architecture/data-ownership.md`
+7. `docs/architecture/database-design.md`
+8. `docs/architecture/repo-structure.md`
+9. `docs/api/rest-api-design.md`
+10. `docs/development/product-code-rules.md`
+11. `docs/development/dependency-versioning.md`
+12. Service-specific README and plan docs when working inside a service
 
 At minimum, an agent must read the docs that directly affect the files being changed.
+
+For product feature work, `docs/development/product-code-rules.md` is mandatory reading. It defines the default standard for code organization, API shape, persistence, state machines, observability, configuration, testing, and readiness for real deployment.
+
+`PROJECT_PROGRESS.md` is the living handoff log. Agents must read it before coding to understand what was already done, what decisions were made, and what should happen next. After substantial work, agents should update it with a concise dated entry.
 
 ## 4. Scope Discipline
 
@@ -61,7 +75,48 @@ Rules:
 - Do not expand livestream, social, mobile, or admin features unless they support the core thesis flow or the current requested task.
 - If a simpler implementation supports the same thesis objective, choose the simpler implementation.
 
-## 5. Architecture Rules
+The app should be realistic, not inflated. A feature is valuable when it strengthens a real product flow, creates useful operational evidence, or supports the thesis evaluation.
+
+## 5. Production-Grade Code Organization
+
+Every code change should leave the repository closer to a system that can run in a real environment.
+
+For Go product services, prefer this layout:
+
+- `cmd/server`: process entrypoint, wiring, graceful shutdown.
+- `internal/config`: environment loading, defaults, validation.
+- `internal/domain`: domain models, state constants, invariants, domain errors.
+- `internal/handler`: HTTP request/response transport, validation boundary, status mapping.
+- `internal/service`: use cases and business workflow orchestration.
+- `internal/repository`: persistence interfaces and database implementations.
+- `internal/event`: event names, payloads, producers, consumers, outbox helpers where needed.
+- `internal/observability`: middleware, logging, metrics, readiness helpers.
+- `migrations`: schema changes owned by the service.
+- `tests`: integration, smoke, or service-level test assets when package-local tests are not enough.
+
+For Python AIOps code, keep separation between:
+
+- `app/api`: HTTP API surface.
+- `app/core`: configuration and shared runtime concerns.
+- `app/collectors`: external evidence collectors.
+- `app/agents`: agent orchestration and specialist agent logic.
+- `app/rag`: chunking, embedding, retrieval, vector-store concerns.
+- `app/redaction`: secret and sensitive-data filtering.
+- `app/scoring`: confidence, ranking, and evaluation helpers.
+- `app/schemas`: request, response, evidence, and RCA schemas.
+
+Layering rules:
+
+- `cmd/server` may wire dependencies, but should not contain product logic.
+- Handlers should not contain business workflow logic.
+- Services should not know HTTP details unless unavoidable.
+- Repositories should not enforce product policy beyond persistence constraints.
+- Domain types should make invalid states harder to express.
+- Cross-service behavior must use APIs, events, or contracts, not shared databases.
+
+Do not collapse new production behavior into a single file only because the current service is small. Small services can start simple, but their code should still point in the direction of this layout.
+
+## 6. Architecture Rules
 
 - Respect bounded contexts described in `docs/architecture/service-boundaries.md`.
 - Do not move business logic into `api-gateway`.
@@ -71,7 +126,7 @@ Rules:
 - Video lifecycle, job lifecycle, and incident lifecycle must use explicit states rather than inferred states.
 - Remediation logic must remain advisory unless the user explicitly asks for automation.
 
-## 6. Data and Storage Rules
+## 7. Data and Storage Rules
 
 - Follow `docs/architecture/database-design.md`.
 - PostgreSQL is the source of truth for transactional and lifecycle state.
@@ -82,7 +137,7 @@ Rules:
 - Timestamps should be stored in UTC.
 - Never store secrets, tokens, presigned URLs, stream keys, or sensitive credentials in logs or persisted evidence.
 
-## 7. API and Contract Rules
+## 8. API and Contract Rules
 
 - Follow `docs/api/rest-api-design.md`.
 - Public API paths go through `api-gateway` under `/api/v1/*`.
@@ -91,7 +146,22 @@ Rules:
 - For new endpoints, define stable error codes and preserve request IDs in responses where the local convention expects them.
 - If an API change affects docs or contracts, update the relevant documentation in the same change when practical.
 
-## 8. Service-Specific Guidance
+## 9. Runtime and Deployment Rules
+
+Production-shaped code must be able to run consistently across local, dev, demo, and Kubernetes.
+
+- Load runtime behavior from explicit configuration.
+- Validate required configuration at startup.
+- Fail fast in non-local environments when critical dependencies or secrets are missing.
+- Provide `/healthz`, `/readyz`, and `/metrics` for services that run as HTTP processes.
+- Use timeouts for network calls, database calls, and upstream requests.
+- Use structured logs with service name, environment, request ID, correlation ID, and entity IDs when available.
+- Keep local fallbacks clearly labeled as local-only.
+- Do not hard-code local URLs, secrets, bucket names, image names, or environment assumptions in product logic.
+
+If a feature depends on PostgreSQL, Redis, object storage, a queue, or another service, treat that dependency as unreliable and code the failure path deliberately.
+
+## 10. Service-Specific Guidance
 
 ### `services/api-gateway`
 
@@ -131,7 +201,7 @@ Rules:
 - Avoid claims without evidence references.
 - Prefer designs that are easy to evaluate against baselines.
 
-## 9. Multi-Agent RAG Rules
+## 11. Multi-Agent RAG Rules
 
 When implementing AIOps or RCA logic:
 
@@ -151,7 +221,7 @@ When adding or changing agents, clearly define:
 - Failure modes
 - Evaluation implications
 
-## 10. DevSecOps and GitOps Rules
+## 12. DevSecOps and GitOps Rules
 
 - Treat CI, image metadata, scan output, manifest diffs, and deployment history as first-class evidence sources.
 - The source repo builds, tests, scans, and packages artifacts.
@@ -159,7 +229,7 @@ When adding or changing agents, clearly define:
 - Do not bypass GitOps assumptions when making deployment-related design decisions unless the user explicitly asks for a local-only shortcut.
 - Security tooling should support the thesis story, not exist only as decoration.
 
-## 11. Testing and Verification Rules
+## 13. Testing and Verification Rules
 
 Agents should scale testing to the risk of the change.
 
@@ -170,7 +240,7 @@ Agents should scale testing to the risk of the change.
 
 When adding meaningful logic, prefer adding or updating tests close to the touched code.
 
-## 12. Documentation Rules
+## 14. Documentation Rules
 
 This project depends heavily on docs for both engineering alignment and thesis writing.
 
@@ -182,17 +252,18 @@ Agents should update docs when changes affect:
 - event contracts
 - dependency versions
 - experiment or incident reproduction flow
+- project progress, handoff state, or next-step priorities
 
 Do not create documentation churn for tiny internal refactors, but do keep docs aligned with real behavior.
 
-## 13. Dependency Rules
+## 15. Dependency Rules
 
 - Follow `docs/development/dependency-versioning.md`.
 - Do not introduce floating versions in production manifests.
 - Prefer the standard library or existing project patterns before adding new libraries.
 - If a new direct dependency is added, update the relevant manifest and versioning docs when required by current repo policy.
 
-## 14. Editing Rules for Agents
+## 16. Editing Rules for Agents
 
 - Keep changes narrow and intentional.
 - Do not perform unrelated refactors while working on a scoped task.
@@ -200,23 +271,33 @@ Do not create documentation churn for tiny internal refactors, but do keep docs 
 - Prefer consistency with the surrounding code over personal style.
 - Leave short comments only when they genuinely improve readability.
 
-## 15. Completion Checklist
+## 17. Completion Checklist
 
 Before finishing a task, agents should check:
 
-- Does this change support the thesis direction or the requested feature directly?
+- Is the code organized for real service growth instead of a quick demo?
+- Can this run outside the author's machine with explicit configuration?
 - Did I respect service boundaries and storage rules?
+- Did I keep business logic out of handlers and gateways where practical?
+- Did I include clear state transitions, error paths, and dependency failure behavior where relevant?
+- Did I preserve observability through logs, metrics, readiness, request IDs, and correlation IDs?
+- Does this change support the thesis direction or the requested feature directly?
 - Did I avoid pushing product scope wider than necessary?
 - Did I update tests if behavior changed?
 - Did I update docs if contracts, architecture, or dependencies changed?
+- Did I update `PROJECT_PROGRESS.md` if this was substantial work or changed next-step priorities?
 - Can the user explain or demo this change easily in the context of the thesis?
 
-## 16. Preferred Default Interpretation
+## 18. Preferred Default Interpretation
 
 If the user says something like:
 
 - "read the rules and code"
 - "follow the repo rules"
 - "code according to project rules"
+- "code product-style"
+- "make it production-grade"
 
 Agents should treat this file as the default authority for implementation style and decision-making in this repository.
+
+If the user asks for product code, agents should also treat `docs/development/product-code-rules.md` as required authority.
