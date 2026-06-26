@@ -64,3 +64,6 @@ pnpm-debug.log*
 # IDE
 .idea/
 .vscode/
+
+aiops-multi-agent-rag-k8s/PROJECT_PROGRESS.md
+aiops-multi-agent-rag-k8s/PROJECT_CONTEXT.md
