@@ -26,7 +26,7 @@ Keep entries concise. This file should help the next session continue, not becom
 
 ## Current State
 
-As of 2026-06-24:
+As of 2026-06-27:
 
 - The project direction is set: a Kubernetes-based microservices video/livestream platform used as a realistic testbed for AIOps RCA with Multi-Agent RAG, DevSecOps evidence, and GitOps-safe remediation.
 - The thesis framing is centered on Multi-Agent RAG for incident investigation and root cause analysis, not on building a commercial video product for its own sake.
@@ -34,6 +34,7 @@ As of 2026-06-24:
 - Kubernetes desired state is intended to live in the companion GitOps repository at `../aiops-gitops-manifests`.
 - Product Go services have a consistent scaffold: `cmd/server`, `internal/config`, `internal/domain`, `internal/event`, `internal/handler`, `internal/observability`, `internal/repository`, `internal/service`, `migrations`, and `tests`.
 - `identity-service` and `api-gateway` are more implemented than the other product services.
+- `api-gateway` now has route proxying, request/correlation IDs, CORS, body limits, upstream timeout, JWT verification through identity JWKS, trusted user-context forwarding, internal header stripping, JSON gateway/auth errors, readiness checks, and basic Prometheus text metrics.
 - Several product services are still mostly skeletons with health, readiness, and metrics placeholders.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
 
@@ -53,6 +54,16 @@ As of 2026-06-24:
 - New AIOps code should preserve clear layers: API, core config, collectors, agents, RAG, redaction, scoring, schemas.
 
 ## Work Log
+
+### 2026-06-27
+
+- Hardened `services/api-gateway` beyond the initial reverse-proxy skeleton.
+- Added JWT access-token verification through identity JWKS using standard-library RS256 verification.
+- Added auth middleware that enforces protected API prefixes, strips spoofed internal user headers, and forwards trusted `X-User-*` context after token verification.
+- Replaced placeholder `/metrics` with basic Prometheus text counters and duration totals.
+- Replaced placeholder `/readyz` with checks for route configuration and JWKS readiness when JWT verification is enabled.
+- Updated `services/api-gateway/README.md` with implemented capabilities and configuration.
+- Verified with `go test ./...` in `services/api-gateway`.
 
 ### 2026-06-24
 
@@ -96,12 +107,13 @@ As of 2026-06-24:
 Recommended engineering order:
 
 1. Keep `identity-service` and `api-gateway` stable as the edge/auth foundation.
-2. Implement `video-service` upload request, metadata persistence, lifecycle state, and event emission.
-3. Implement `media-worker` processing job persistence, retries, dead-letter state, and status updates.
-4. Implement a minimal ready-video feed in `feed-social-service`.
-5. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
-6. Define incident fixtures, runbooks, ground truth, and evaluation metrics.
-7. Implement `aiops-service` evidence schema, collectors, RAG pipeline, agents, RCA synthesis, and evaluator.
+2. Add Redis-backed rate limiting to `api-gateway` when the edge/auth foundation needs another hardening pass.
+3. Implement `video-service` upload request, metadata persistence, lifecycle state, and event emission.
+4. Implement `media-worker` processing job persistence, retries, dead-letter state, and status updates.
+5. Implement a minimal ready-video feed in `feed-social-service`.
+6. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
+7. Define incident fixtures, runbooks, ground truth, and evaluation metrics.
+8. Implement `aiops-service` evidence schema, collectors, RAG pipeline, agents, RCA synthesis, and evaluator.
 
 Recommended documentation order:
 
@@ -115,6 +127,7 @@ Recommended documentation order:
 - Scope risk: building too much product surface before the core incident/RCA loop works.
 - Evaluation risk: Multi-Agent RAG needs clear baselines and measurable criteria, not only a demo.
 - Implementation risk: skeleton services need real config, persistence, APIs, events, tests, and observability before they feel production-shaped.
+- Gateway risk: Redis-backed rate limiting and richer route/upstream metrics are still pending.
 - DevSecOps risk: security scans, CI, GitOps history, and deployment evidence must become real inputs to RCA, not decorative pipeline items.
 - AIOps risk: agent outputs must cite evidence and expose uncertainty to avoid fluent but unsupported conclusions.
 

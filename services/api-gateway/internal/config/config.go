@@ -18,11 +18,18 @@ type Route struct {
 
 type Config struct {
 	Port                  string
+	Environment           string
 	LogLevel              slog.Level
 	Routes                []Route
 	CORSAllowedOrigins    []string
 	RequestBodyLimitBytes int64
 	UpstreamTimeout       time.Duration
+	JWTVerifyEnabled      bool
+	JWKSURL               string
+	JWTIssuer             string
+	JWTAudience           string
+	JWKSCacheTTL          time.Duration
+	AuthRequiredPrefixes  []string
 }
 
 func Load() (Config, error) {
@@ -33,11 +40,21 @@ func Load() (Config, error) {
 
 	return Config{
 		Port:                  getenv("PORT", "8080"),
+		Environment:           getenv("ENVIRONMENT", "local"),
 		LogLevel:              parseLogLevel(getenv("LOG_LEVEL", "info")),
 		Routes:                routes,
 		CORSAllowedOrigins:    parseCSV(getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")),
 		RequestBodyLimitBytes: parseInt64(getenv("REQUEST_BODY_LIMIT_BYTES", "1048576"), 1048576),
 		UpstreamTimeout:       parseDuration(getenv("UPSTREAM_TIMEOUT", "15s"), 15*time.Second),
+		JWTVerifyEnabled:      parseBool(getenv("JWT_VERIFY_ENABLED", "true"), true),
+		JWKSURL:               getenv("JWKS_URL", strings.TrimRight(getenv("IDENTITY_SERVICE_URL", "http://localhost:8081"), "/")+"/.well-known/jwks.json"),
+		JWTIssuer:             getenv("JWT_ISSUER", "aiops-video-platform"),
+		JWTAudience:           getenv("JWT_AUDIENCE", "aiops-api"),
+		JWKSCacheTTL:          parseDuration(getenv("JWKS_CACHE_TTL", "5m"), 5*time.Minute),
+		AuthRequiredPrefixes: parseCSV(getenv(
+			"AUTH_REQUIRED_PREFIXES",
+			"/api/v1/users/,/api/v1/videos/,/api/v1/live-sessions/,/api/v1/incidents/",
+		)),
 	}, nil
 }
 
@@ -108,6 +125,17 @@ func parseDuration(value string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return parsed
+}
+
+func parseBool(value string, fallback bool) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "1", "yes", "y", "on":
+		return true
+	case "false", "0", "no", "n", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func getenv(key, fallback string) string {
