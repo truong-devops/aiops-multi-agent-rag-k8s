@@ -194,9 +194,6 @@ func (s *VideoService) ConfirmUploaded(ctx context.Context, input ConfirmUploade
 	upload.Status = domain.UploadStatusUploaded
 	upload.CompletedAt = &completedAt
 	upload.UpdatedAt = now
-	if err := s.store.SaveUploadRequest(ctx, upload); err != nil {
-		return domain.Video{}, err
-	}
 
 	previousStatus := video.Status
 	video.Status = domain.VideoStatusUploaded
@@ -213,7 +210,7 @@ func (s *VideoService) ConfirmUploaded(ctx context.Context, input ConfirmUploade
 		CorrelationID:  input.CorrelationID,
 		CreatedAt:      now,
 	}
-	if err := s.store.SaveVideoStatus(ctx, video, history); err != nil {
+	if err := s.store.CompleteUpload(ctx, upload, video, history); err != nil {
 		return domain.Video{}, err
 	}
 	return video, nil

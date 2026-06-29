@@ -80,6 +80,15 @@ func (s *MemoryStore) SaveUploadRequest(_ context.Context, upload domain.UploadR
 	return nil
 }
 
+func (s *MemoryStore) CompleteUpload(_ context.Context, upload domain.UploadRequest, video domain.Video, history domain.StatusHistory) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.uploads[upload.ID] = upload
+	s.videos[video.ID] = video
+	s.statusHistory = append(s.statusHistory, history)
+	return nil
+}
+
 func (s *MemoryStore) SaveVideoStatus(_ context.Context, video domain.Video, history domain.StatusHistory) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

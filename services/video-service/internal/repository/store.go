@@ -18,6 +18,7 @@ type Store interface {
 	ListVideos(ctx context.Context, filter ListVideosFilter) ([]domain.Video, error)
 	FindUploadRequestByID(ctx context.Context, id string) (domain.UploadRequest, error)
 	SaveUploadRequest(ctx context.Context, upload domain.UploadRequest) error
+	CompleteUpload(ctx context.Context, upload domain.UploadRequest, video domain.Video, history domain.StatusHistory) error
 	SaveVideoStatus(ctx context.Context, video domain.Video, history domain.StatusHistory) error
 	Ping(ctx context.Context) error
 }

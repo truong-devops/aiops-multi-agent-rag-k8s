@@ -13,6 +13,7 @@ type Config struct {
 	Port                  string
 	Environment           string
 	LogLevel              slog.Level
+	DatabaseURL           string
 	RawVideoBucket        string
 	UploadURLBase         string
 	UploadRequestTTL      time.Duration
@@ -24,6 +25,7 @@ func Load() (Config, error) {
 		Port:                  getenv("PORT", "8080"),
 		Environment:           getenv("ENVIRONMENT", "local"),
 		LogLevel:              parseLogLevel(getenv("LOG_LEVEL", "info")),
+		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		RawVideoBucket:        getenv("RAW_VIDEO_BUCKET", "raw-videos"),
 		UploadURLBase:         strings.TrimRight(getenv("UPLOAD_URL_BASE", ""), "/"),
 		UploadRequestTTL:      parseDuration(getenv("UPLOAD_REQUEST_TTL", "30m"), 30*time.Minute),
@@ -48,7 +50,23 @@ func (c Config) Validate() error {
 	if c.RequestBodyLimitBytes <= 0 {
 		return fmt.Errorf("REQUEST_BODY_LIMIT_BYTES must be positive")
 	}
+	if !c.IsLocal() && strings.TrimSpace(c.DatabaseURL) == "" {
+		return fmt.Errorf("DATABASE_URL is required when ENVIRONMENT=%s", c.Environment)
+	}
 	return nil
+}
+
+func (c Config) UsePostgres() bool {
+	return strings.TrimSpace(c.DatabaseURL) != ""
+}
+
+func (c Config) IsLocal() bool {
+	switch strings.ToLower(strings.TrimSpace(c.Environment)) {
+	case "", "local", "dev", "development", "test":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseLogLevel(value string) slog.Level {

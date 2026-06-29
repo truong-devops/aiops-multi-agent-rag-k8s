@@ -35,6 +35,7 @@ Public paths should be reached through `api-gateway` as `/api/v1/...`.
 | `PORT` | `8080` | HTTP server port. |
 | `ENVIRONMENT` | `local` | Runtime environment label. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
+| `DATABASE_URL` | empty | PostgreSQL DSN. Required outside local/dev/test environments. |
 | `RAW_VIDEO_BUCKET` | `raw-videos` | Bucket name used for raw upload object keys. |
 | `UPLOAD_URL_BASE` | empty | Optional local/dev upload base URL. This is not a real presigned URL implementation. |
 | `UPLOAD_REQUEST_TTL` | `30m` | Upload request expiry duration. |
@@ -42,13 +43,17 @@ Public paths should be reached through `api-gateway` as `/api/v1/...`.
 
 ## Current Implementation
 
-The service currently uses an in-memory repository so the API can run locally and be tested without external dependencies. This is a deliberate first step to keep handler, service, domain and repository boundaries clean.
+The service can run with either PostgreSQL or an in-memory repository.
 
-Production persistence and integration work still needs:
+- When `DATABASE_URL` is set, the service uses PostgreSQL for videos, upload requests and status history.
+- When `DATABASE_URL` is empty in local/dev/test environments, the service falls back to an in-memory store for local development.
+- Outside local/dev/test environments, `DATABASE_URL` is required and startup fails fast if it is missing.
 
-- PostgreSQL implementation for videos, upload requests, status history and outbox events.
+Production integration work still needs:
+
 - MinIO presigned upload URL generation.
 - Redpanda/Kafka event publishing for `video.uploaded`.
+- Outbox writes/publisher for `video.uploaded.v1`.
 - Redis idempotency cache for upload request creation.
 
 ## State Machine
@@ -80,7 +85,8 @@ This first implementation records request and correlation IDs on video/upload st
 
 - Tích hợp MinIO/presigned URL thật.
 - Publish event `video.uploaded`.
-- PostgreSQL persistence and outbox worker.
+- Outbox write and publisher worker.
+- Database-backed integration tests.
 
 ## Dependencies Dự Kiến
 
