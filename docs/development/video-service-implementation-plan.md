@@ -23,7 +23,7 @@ Service nay khong xu ly FFmpeg, khong quan ly retry worker, khong ghi feed/socia
 
 ## Current Snapshot
 
-As of 2026-06-29:
+As of 2026-06-30:
 
 - `[x]` Da co Go service layout theo huong production: `cmd/server`, `internal/config`, `internal/domain`, `internal/handler`, `internal/observability`, `internal/repository`, `internal/service`, `migrations`, `tests`.
 - `[x]` Da co domain model cho video, upload request va status history.
@@ -36,9 +36,9 @@ As of 2026-06-29:
 - `[x]` Da co PostgreSQL repository cho video, upload request va status history.
 - `[x]` Da co `DATABASE_URL` config va startup wiring chon PostgreSQL khi co DSN.
 - `[ ]` Chua co MinIO presigned upload URL that.
-- `[ ]` Chua co outbox event cho `video.uploaded.v1`.
+- `[x]` Da co outbox event write cho `video.uploaded.v1` khi confirm upload.
 - `[ ]` Chua co Redpanda/Kafka publisher.
-- `[ ]` Chua co integration tests voi database/object storage.
+- `[~]` Da co PostgreSQL integration test harness, chua wire vao CI/local compose.
 
 ## Implemented API Surface
 
@@ -118,7 +118,7 @@ MinIO ownership:
 
 Main outgoing event:
 
-- `[ ]` `video.uploaded.v1`
+- `[x]` `video.uploaded.v1` is written to `outbox_events` as `pending`.
 
 Payload must include:
 
@@ -170,7 +170,7 @@ Done criteria:
 - `[x]` Implement transactional status update with status history.
 - `[x]` Add DB indexes from `docs/architecture/database-design.md`.
 - `[x]` Keep in-memory repository only for local/test mode.
-- `[ ]` Add integration tests for repository behavior.
+- `[~]` Add integration tests for repository behavior.
 
 Done criteria:
 
@@ -196,14 +196,14 @@ Done criteria:
 
 ## Phase 4: Outbox And Event Publishing
 
-- `[ ]` Write `video.uploaded.v1` into `outbox_events` in the same DB transaction as upload confirmation.
-- `[ ]` Add outbox event domain model.
-- `[ ]` Add event payload builder.
+- `[x]` Write `video.uploaded.v1` into `outbox_events` in the same DB transaction as upload confirmation.
+- `[x]` Add outbox event domain model.
+- `[x]` Add event payload builder.
 - `[ ]` Add publisher worker for Redpanda/Kafka-compatible broker.
 - `[ ]` Mark outbox event `published` only after broker ack.
 - `[ ]` Add retry/backoff and `failed` status for publish failures.
 - `[ ]` Add metrics for pending, published and failed outbox events.
-- `[ ]` Add tests proving upload confirmation and outbox write are atomic.
+- `[~]` Add tests proving upload confirmation and outbox write are atomic.
 
 Done criteria:
 
@@ -261,15 +261,15 @@ Done criteria:
 
 Next best engineering task:
 
-1. Add database-backed integration tests for `repository.PostgresStore`.
-2. Add outbox domain/event builder for `video.uploaded.v1`.
-3. Write `video.uploaded.v1` into `outbox_events` in the same DB transaction as upload confirmation.
-4. Then add MinIO presigned upload URL generation.
+1. Wire PostgreSQL integration tests into local compose or CI.
+2. Add an outbox publisher worker for Redpanda/Kafka.
+3. Add MinIO presigned upload URL generation.
+4. Add idempotency handling for upload request creation.
 
 Reason:
 
-- PostgreSQL persistence now exists, but it still needs integration coverage with a real database.
-- Outbox write is the next step that connects `video-service` to `media-worker`.
+- PostgreSQL persistence and outbox write now have a DB test harness, but it still needs a repeatable local/CI database workflow.
+- The publisher is the next step that turns pending outbox rows into consumable broker events for `media-worker`.
 - MinIO presigned upload should follow once durable metadata and event intent are stable.
 
 ## Update Rule

@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/domain"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/event"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/repository"
 )
 
@@ -55,6 +57,26 @@ func TestCreateUploadRequestAndConfirmUploaded(t *testing.T) {
 	}
 	if uploaded.SizeBytes != 2048 {
 		t.Fatalf("uploaded size = %d, want 2048", uploaded.SizeBytes)
+	}
+	events := store.OutboxEvents()
+	if len(events) != 1 {
+		t.Fatalf("outbox events = %d, want 1", len(events))
+	}
+	if events[0].EventName != event.VideoUploadedName || events[0].EventVersion != event.VideoUploadedVersion {
+		t.Fatalf("outbox event name/version = %s/%s", events[0].EventName, events[0].EventVersion)
+	}
+	if events[0].Status != domain.OutboxStatusPending {
+		t.Fatalf("outbox status = %q, want pending", events[0].Status)
+	}
+	if events[0].RequestID != "req_124" || events[0].CorrelationID != "corr_123" {
+		t.Fatalf("outbox request/correlation = %s/%s", events[0].RequestID, events[0].CorrelationID)
+	}
+	var payload event.VideoUploadedPayload
+	if err := json.Unmarshal(events[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal outbox payload: %v", err)
+	}
+	if payload.VideoID != uploaded.ID || payload.OwnerID != "usr_123" || payload.SizeBytes != 2048 {
+		t.Fatalf("outbox payload = %#v", payload)
 	}
 }
 

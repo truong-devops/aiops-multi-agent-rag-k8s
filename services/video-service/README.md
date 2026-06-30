@@ -49,11 +49,15 @@ The service can run with either PostgreSQL or an in-memory repository.
 - When `DATABASE_URL` is empty in local/dev/test environments, the service falls back to an in-memory store for local development.
 - Outside local/dev/test environments, `DATABASE_URL` is required and startup fails fast if it is missing.
 
+Implemented integration foundation:
+
+- Confirm upload writes `video.uploaded.v1` into `outbox_events` in the same repository operation as upload/video status updates.
+- The outbox event is pending until a future publisher sends it to Redpanda/Kafka.
+
 Production integration work still needs:
 
 - MinIO presigned upload URL generation.
 - Redpanda/Kafka event publishing for `video.uploaded`.
-- Outbox writes/publisher for `video.uploaded.v1`.
 - Redis idempotency cache for upload request creation.
 
 ## State Machine
@@ -77,16 +81,28 @@ created -> uploaded
 
 ## Event Plan
 
-The service should publish `video.uploaded.v1` after upload metadata is committed. The event contract is defined in `packages/contracts/event-contracts.md`.
+The service records `video.uploaded.v1` as a pending outbox event after upload metadata is committed. The event contract is defined in `packages/contracts/event-contracts.md`.
 
-This first implementation records request and correlation IDs on video/upload state so the future outbox publisher has the right evidence fields.
+The current implementation records request ID, correlation ID, producer, environment and payload fields so the future outbox publisher has the right evidence.
 
 ## Trách Nhiệm Chưa Làm
 
 - Tích hợp MinIO/presigned URL thật.
 - Publish event `video.uploaded`.
-- Outbox write and publisher worker.
-- Database-backed integration tests.
+- Outbox publisher worker.
+- Run database-backed integration tests in CI/local compose.
+
+## Tests
+
+```bash
+go test ./...
+```
+
+PostgreSQL repository integration tests are skipped by default. To run them, provide a disposable database URL:
+
+```bash
+VIDEO_SERVICE_TEST_DATABASE_URL='postgres://video:video@localhost:5432/video_db?sslmode=disable' go test ./internal/repository
+```
 
 ## Dependencies Dự Kiến
 

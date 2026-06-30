@@ -10,11 +10,11 @@ Legend:
 
 ## Current Snapshot
 
-As of 2026-06-29:
+As of 2026-06-30:
 
 - `identity-service`: da co auth/profile/JWT/OAuth/JWKS/PostgreSQL/Redis-facing design o muc tot hon cac service khac.
 - `api-gateway`: da co routing, request/correlation ID, JWT verify qua JWKS, trusted user-context forwarding, readiness va basic metrics.
-- `video-service`: da co in-memory local mode va PostgreSQL persistence cho upload request, video metadata, confirm upload va state transition; MinIO/outbox/event publishing van chua lam.
+- `video-service`: da co in-memory local mode, PostgreSQL persistence va outbox write cho `video.uploaded.v1`; MinIO va Redpanda/Kafka publisher van chua lam.
 - `media-worker`, `feed-social-service`, `live-service`: van chu yeu la skeleton.
 - `aiops-service`: da co package layout, chua co RCA pipeline that.
 
@@ -67,9 +67,9 @@ Detailed service checklist: `docs/development/video-service-implementation-plan.
 - `[x]` Add PostgreSQL repository implementation.
 - `[ ]` Add idempotency handling for upload request creation.
 - `[ ]` Add MinIO presigned upload URL generation.
-- `[ ]` Add outbox write for `video.uploaded.v1`.
+- `[x]` Add outbox write for `video.uploaded.v1`.
 - `[ ]` Add event publisher worker or publish path for Redpanda/Kafka.
-- `[ ]` Add integration tests for database-backed flow.
+- `[~]` Add integration tests for database-backed flow.
 
 Done criteria:
 
@@ -210,8 +210,8 @@ Done criteria:
 
 ## Suggested Immediate Next Steps
 
-1. Add database-backed integration tests for `video-service` PostgreSQL repository.
-2. Add `video.uploaded.v1` outbox event creation.
+1. Wire `video-service` PostgreSQL integration tests into local compose or CI.
+2. Add outbox publisher worker or publish path for Redpanda/Kafka.
 3. Add MinIO presigned upload URL generation.
 4. Start `media-worker` processing job model and state machine.
 5. Keep gateway rate limiting as a hardening task after video flow has durable storage.

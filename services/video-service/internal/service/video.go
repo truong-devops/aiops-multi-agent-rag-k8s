@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/domain"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/event"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/repository"
 )
 
 type VideoService struct {
 	store            repository.Store
+	environment      string
 	rawVideoBucket   string
 	uploadURLBase    string
 	uploadRequestTTL time.Duration
@@ -21,6 +23,7 @@ type VideoService struct {
 }
 
 type Options struct {
+	Environment      string
 	RawVideoBucket   string
 	UploadURLBase    string
 	UploadRequestTTL time.Duration
@@ -73,6 +76,7 @@ func NewVideoService(store repository.Store, options Options) *VideoService {
 	}
 	return &VideoService{
 		store:            store,
+		environment:      defaultEnvironment(options.Environment),
 		rawVideoBucket:   options.RawVideoBucket,
 		uploadURLBase:    strings.TrimRight(options.UploadURLBase, "/"),
 		uploadRequestTTL: ttl,
@@ -210,7 +214,11 @@ func (s *VideoService) ConfirmUploaded(ctx context.Context, input ConfirmUploade
 		CorrelationID:  input.CorrelationID,
 		CreatedAt:      now,
 	}
-	if err := s.store.CompleteUpload(ctx, upload, video, history); err != nil {
+	outbox, err := event.NewVideoUploadedOutbox(video, s.environment, now)
+	if err != nil {
+		return domain.Video{}, err
+	}
+	if err := s.store.CompleteUpload(ctx, upload, video, history, outbox); err != nil {
 		return domain.Video{}, err
 	}
 	return video, nil
@@ -310,4 +318,12 @@ func rawObjectKey(videoID string, contentType string) string {
 func validVideoContentType(contentType string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	return strings.HasPrefix(contentType, "video/")
+}
+
+func defaultEnvironment(environment string) string {
+	environment = strings.TrimSpace(environment)
+	if environment == "" {
+		return "local"
+	}
+	return environment
 }

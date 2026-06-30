@@ -170,7 +170,7 @@ func (s *PostgresStore) SaveUploadRequest(ctx context.Context, upload domain.Upl
 	return requireRowsAffected(result, domain.NotFound(domain.CodeUploadRequestNotFound, "Upload request was not found."))
 }
 
-func (s *PostgresStore) CompleteUpload(ctx context.Context, upload domain.UploadRequest, video domain.Video, history domain.StatusHistory) error {
+func (s *PostgresStore) CompleteUpload(ctx context.Context, upload domain.UploadRequest, video domain.Video, history domain.StatusHistory, outbox domain.OutboxEvent) error {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
@@ -185,6 +185,11 @@ func (s *PostgresStore) CompleteUpload(ctx context.Context, upload domain.Upload
 	}
 	if err := insertStatusHistory(ctx, tx, history); err != nil {
 		return err
+	}
+	if outbox.ID != "" {
+		if err := insertOutboxEvent(ctx, tx, outbox); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -303,6 +308,18 @@ func insertStatusHistory(ctx context.Context, exec sqlExecutor, history domain.S
 		VALUES ($1, $2, NULLIF($3, ''), $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), $9)
 	`, history.ID, history.VideoID, history.PreviousStatus, history.NewStatus, history.Reason, history.ErrorCode,
 		history.RequestID, history.CorrelationID, history.CreatedAt)
+	return err
+}
+
+func insertOutboxEvent(ctx context.Context, exec sqlExecutor, event domain.OutboxEvent) error {
+	_, err := exec.ExecContext(ctx, `
+		INSERT INTO outbox_events (
+			id, event_name, event_version, aggregate_id, producer, environment,
+			payload, status, request_id, correlation_id, occurred_at, published_at, created_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, NULLIF($9, ''), NULLIF($10, ''), $11, $12, $13)
+	`, event.ID, event.EventName, event.EventVersion, event.AggregateID, event.Producer, event.Environment,
+		string(event.Payload), event.Status, event.RequestID, event.CorrelationID, event.OccurredAt, event.PublishedAt, event.CreatedAt)
 	return err
 }
 

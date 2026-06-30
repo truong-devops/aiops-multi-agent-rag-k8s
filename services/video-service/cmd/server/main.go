@@ -37,6 +37,7 @@ func main() {
 	defer closeStore()
 
 	videoService := service.NewVideoService(store, service.Options{
+		Environment:      cfg.Environment,
 		RawVideoBucket:   cfg.RawVideoBucket,
 		UploadURLBase:    cfg.UploadURLBase,
 		UploadRequestTTL: cfg.UploadRequestTTL,

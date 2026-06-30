@@ -18,6 +18,10 @@ const (
 	UploadStatusUploaded  = "uploaded"
 	UploadStatusExpired   = "expired"
 	UploadStatusCancelled = "cancelled"
+
+	OutboxStatusPending   = "pending"
+	OutboxStatusPublished = "published"
+	OutboxStatusFailed    = "failed"
 )
 
 type Video struct {
@@ -72,6 +76,22 @@ type StatusHistory struct {
 	RequestID      string
 	CorrelationID  string
 	CreatedAt      time.Time
+}
+
+type OutboxEvent struct {
+	ID            string
+	EventName     string
+	EventVersion  string
+	AggregateID   string
+	Producer      string
+	Environment   string
+	Payload       []byte
+	Status        string
+	RequestID     string
+	CorrelationID string
+	OccurredAt    time.Time
+	PublishedAt   *time.Time
+	CreatedAt     time.Time
 }
 
 func ValidVisibility(value string) bool {

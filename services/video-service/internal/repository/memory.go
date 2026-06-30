@@ -13,6 +13,7 @@ type MemoryStore struct {
 	videos        map[string]domain.Video
 	uploads       map[string]domain.UploadRequest
 	statusHistory []domain.StatusHistory
+	outboxEvents  []domain.OutboxEvent
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -80,12 +81,15 @@ func (s *MemoryStore) SaveUploadRequest(_ context.Context, upload domain.UploadR
 	return nil
 }
 
-func (s *MemoryStore) CompleteUpload(_ context.Context, upload domain.UploadRequest, video domain.Video, history domain.StatusHistory) error {
+func (s *MemoryStore) CompleteUpload(_ context.Context, upload domain.UploadRequest, video domain.Video, history domain.StatusHistory, outbox domain.OutboxEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.uploads[upload.ID] = upload
 	s.videos[video.ID] = video
 	s.statusHistory = append(s.statusHistory, history)
+	if outbox.ID != "" {
+		s.outboxEvents = append(s.outboxEvents, outbox)
+	}
 	return nil
 }
 
@@ -99,4 +103,12 @@ func (s *MemoryStore) SaveVideoStatus(_ context.Context, video domain.Video, his
 
 func (s *MemoryStore) Ping(context.Context) error {
 	return nil
+}
+
+func (s *MemoryStore) OutboxEvents() []domain.OutboxEvent {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	events := make([]domain.OutboxEvent, len(s.outboxEvents))
+	copy(events, s.outboxEvents)
+	return events
 }
