@@ -23,7 +23,7 @@ Service nay khong xu ly FFmpeg, khong quan ly retry worker, khong ghi feed/socia
 
 ## Current Snapshot
 
-As of 2026-06-30:
+As of 2026-07-01:
 
 - `[x]` Da co Go service layout theo huong production: `cmd/server`, `internal/config`, `internal/domain`, `internal/handler`, `internal/observability`, `internal/repository`, `internal/service`, `migrations`, `tests`.
 - `[x]` Da co domain model cho video, upload request va status history.
@@ -38,7 +38,7 @@ As of 2026-06-30:
 - `[ ]` Chua co MinIO presigned upload URL that.
 - `[x]` Da co outbox event write cho `video.uploaded.v1` khi confirm upload.
 - `[ ]` Chua co Redpanda/Kafka publisher.
-- `[~]` Da co PostgreSQL integration test harness, chua wire vao CI/local compose.
+- `[x]` Da co PostgreSQL integration test harness va local compose/CI wiring.
 
 ## Implemented API Surface
 
@@ -170,7 +170,7 @@ Done criteria:
 - `[x]` Implement transactional status update with status history.
 - `[x]` Add DB indexes from `docs/architecture/database-design.md`.
 - `[x]` Keep in-memory repository only for local/test mode.
-- `[~]` Add integration tests for repository behavior.
+- `[x]` Add integration tests for repository behavior.
 
 Done criteria:
 
@@ -203,7 +203,7 @@ Done criteria:
 - `[ ]` Mark outbox event `published` only after broker ack.
 - `[ ]` Add retry/backoff and `failed` status for publish failures.
 - `[ ]` Add metrics for pending, published and failed outbox events.
-- `[~]` Add tests proving upload confirmation and outbox write are atomic.
+- `[x]` Add tests proving upload confirmation and outbox write are atomic.
 
 Done criteria:
 
@@ -261,14 +261,14 @@ Done criteria:
 
 Next best engineering task:
 
-1. Wire PostgreSQL integration tests into local compose or CI.
-2. Add an outbox publisher worker for Redpanda/Kafka.
-3. Add MinIO presigned upload URL generation.
-4. Add idempotency handling for upload request creation.
+1. Add an outbox publisher worker for Redpanda/Kafka.
+2. Add MinIO presigned upload URL generation.
+3. Add idempotency handling for upload request creation.
+4. Add owner/internal authorization checks for video mutation routes.
 
 Reason:
 
-- PostgreSQL persistence and outbox write now have a DB test harness, but it still needs a repeatable local/CI database workflow.
+- PostgreSQL persistence and outbox write now have a repeatable local/CI integration test workflow.
 - The publisher is the next step that turns pending outbox rows into consumable broker events for `media-worker`.
 - MinIO presigned upload should follow once durable metadata and event intent are stable.
 

@@ -26,7 +26,7 @@ Keep entries concise. This file should help the next session continue, not becom
 
 ## Current State
 
-As of 2026-06-30:
+As of 2026-07-01:
 
 - The project direction is set: a Kubernetes-based microservices video/livestream platform used as a realistic testbed for AIOps RCA with Multi-Agent RAG, DevSecOps evidence, and GitOps-safe remediation.
 - The thesis framing is centered on Multi-Agent RAG for incident investigation and root cause analysis, not on building a commercial video product for its own sake.
@@ -35,7 +35,7 @@ As of 2026-06-30:
 - Product Go services have a consistent scaffold: `cmd/server`, `internal/config`, `internal/domain`, `internal/event`, `internal/handler`, `internal/observability`, `internal/repository`, `internal/service`, `migrations`, and `tests`.
 - `identity-service` and `api-gateway` are more implemented than the other product services.
 - `api-gateway` now has route proxying, request/correlation IDs, CORS, body limits, upstream timeout, JWT verification through identity JWKS, trusted user-context forwarding, internal header stripping, JSON gateway/auth errors, readiness checks, and basic Prometheus text metrics.
-- `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, and pending outbox writes for `video.uploaded.v1`.
+- `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, local/CI DB integration workflow, and pending outbox writes for `video.uploaded.v1`.
 - Several product services beyond `identity-service`, `api-gateway`, and `video-service` are still mostly skeletons with health, readiness, and metrics placeholders.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
 
@@ -55,6 +55,15 @@ As of 2026-06-30:
 - New AIOps code should preserve clear layers: API, core config, collectors, agents, RAG, redaction, scoring, schemas.
 
 ## Work Log
+
+### 2026-07-01
+
+- Wired `video-service` PostgreSQL integration tests into local compose and GitLab CI.
+- Added a `postgres-test` compose profile, `make test-video-integration`, and `validate:video-postgres` CI job using `postgres:16-alpine`.
+- Updated `services/video-service/README.md`, `deploy/docker-compose/README.md`, and implementation plan docs with the new test workflow.
+- Verified with `go test ./...` in `services/video-service`, `docker compose config`, `docker compose --profile test config`, and `git diff --check`.
+- Could not run `make test-video-integration` locally because Docker daemon was not running in the current environment.
+- Notes for next session: implement the Redpanda/Kafka outbox publisher, then add MinIO presigned upload URL generation.
 
 ### 2026-06-30
 
@@ -146,8 +155,8 @@ Recommended engineering order:
 
 1. Keep `identity-service` and `api-gateway` stable as the edge/auth foundation.
 2. Add Redis-backed rate limiting to `api-gateway` when the edge/auth foundation needs another hardening pass.
-3. Wire `video-service` PostgreSQL integration tests into local compose or CI.
-4. Add Redpanda/Kafka outbox publishing and MinIO presigned upload URL generation.
+3. Add Redpanda/Kafka outbox publishing and MinIO presigned upload URL generation.
+4. Add idempotency handling for `video-service` upload request creation.
 5. Implement `media-worker` processing job persistence, retries, dead-letter state, and status updates.
 6. Implement a minimal ready-video feed in `feed-social-service`.
 7. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
@@ -166,7 +175,7 @@ Recommended documentation order:
 - Scope risk: building too much product surface before the core incident/RCA loop works.
 - Evaluation risk: Multi-Agent RAG needs clear baselines and measurable criteria, not only a demo.
 - Implementation risk: remaining skeleton services need real config, persistence, APIs, events, tests, and observability before they feel production-shaped.
-- Video-service risk: PostgreSQL persistence and outbox write exist, but CI/local DB integration workflow, MinIO presigned upload and Redpanda/Kafka outbox publishing are still required for a real deployment flow.
+- Video-service risk: PostgreSQL persistence, DB integration workflow and outbox write exist, but MinIO presigned upload and Redpanda/Kafka outbox publishing are still required for a real deployment flow.
 - Gateway risk: Redis-backed rate limiting and richer route/upstream metrics are still pending.
 - DevSecOps risk: security scans, CI, GitOps history, and deployment evidence must become real inputs to RCA, not decorative pipeline items.
 - AIOps risk: agent outputs must cite evidence and expose uncertainty to avoid fluent but unsupported conclusions.

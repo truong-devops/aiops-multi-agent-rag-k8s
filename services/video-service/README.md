@@ -104,6 +104,12 @@ PostgreSQL repository integration tests are skipped by default. To run them, pro
 VIDEO_SERVICE_TEST_DATABASE_URL='postgres://video:video@localhost:5432/video_db?sslmode=disable' go test ./internal/repository
 ```
 
+Or use the local compose test database:
+
+```bash
+make test-video-integration
+```
+
 ## Dependencies Dự Kiến
 
 - PostgreSQL for video metadata, upload requests, assets and outbox events.
