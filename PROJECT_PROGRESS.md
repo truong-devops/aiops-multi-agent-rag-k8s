@@ -35,7 +35,7 @@ As of 2026-07-01:
 - Product Go services have a consistent scaffold: `cmd/server`, `internal/config`, `internal/domain`, `internal/event`, `internal/handler`, `internal/observability`, `internal/repository`, `internal/service`, `migrations`, and `tests`.
 - `identity-service` and `api-gateway` are more implemented than the other product services.
 - `api-gateway` now has route proxying, request/correlation IDs, CORS, body limits, upstream timeout, JWT verification through identity JWKS, trusted user-context forwarding, internal header stripping, JSON gateway/auth errors, readiness checks, and basic Prometheus text metrics.
-- `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, local/CI DB integration workflow, and pending outbox writes for `video.uploaded.v1`.
+- `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, local/CI DB integration workflow, idempotent upload intent creation, MinIO/S3 presigned upload URLs, owner/internal authorization, pending outbox writes for `video.uploaded.v1`, and a Redpanda/Kafka outbox publisher worker.
 - Several product services beyond `identity-service`, `api-gateway`, and `video-service` are still mostly skeletons with health, readiness, and metrics placeholders.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
 
@@ -57,6 +57,13 @@ As of 2026-07-01:
 ## Work Log
 
 ### 2026-07-01
+
+- Added the next `video-service` production slice: MinIO/S3-compatible presigned PUT URL generation, `Idempotency-Key` handling for upload request creation, owner/admin/internal authorization, and internal-token protected status updates.
+- Added Redpanda/Kafka outbox publishing using `github.com/segmentio/kafka-go v0.4.51`; the worker polls publishable outbox rows, publishes full envelopes, marks events `published` after broker ack, marks publish failures as `failed`, and records outbox/DB metrics.
+- Added migration `003_idempotency_outbox_attempts.sql`, repository support for idempotency lookup and outbox publish state, structured logs around upload/outbox workflows, and expanded Prometheus metrics for upload, presign, outbox and DB operations.
+- Updated `services/video-service/README.md`, `docs/development/video-service-implementation-plan.md`, `docs/development/implementation-plan.md`, and dependency version docs.
+- Verified with `go test ./...` in `services/video-service`.
+- Notes for next session: define the `media-worker` processing contract and add tests for worker-driven internal status transitions; optional MinIO object metadata verification can follow.
 
 - Wired `video-service` PostgreSQL integration tests into local compose and GitLab CI.
 - Added a `postgres-test` compose profile, `make test-video-integration`, and `validate:video-postgres` CI job using `postgres:16-alpine`.
@@ -155,9 +162,9 @@ Recommended engineering order:
 
 1. Keep `identity-service` and `api-gateway` stable as the edge/auth foundation.
 2. Add Redis-backed rate limiting to `api-gateway` when the edge/auth foundation needs another hardening pass.
-3. Add Redpanda/Kafka outbox publishing and MinIO presigned upload URL generation.
-4. Add idempotency handling for `video-service` upload request creation.
-5. Implement `media-worker` processing job persistence, retries, dead-letter state, and status updates.
+3. Define the `media-worker` processing contract with `video-service`.
+4. Implement `media-worker` processing job persistence, retries, dead-letter state, and status updates.
+5. Add MinIO object metadata verification in `video-service` if stronger upload evidence is needed.
 6. Implement a minimal ready-video feed in `feed-social-service`.
 7. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
 8. Define incident fixtures, runbooks, ground truth, and evaluation metrics.
@@ -175,7 +182,7 @@ Recommended documentation order:
 - Scope risk: building too much product surface before the core incident/RCA loop works.
 - Evaluation risk: Multi-Agent RAG needs clear baselines and measurable criteria, not only a demo.
 - Implementation risk: remaining skeleton services need real config, persistence, APIs, events, tests, and observability before they feel production-shaped.
-- Video-service risk: PostgreSQL persistence, DB integration workflow and outbox write exist, but MinIO presigned upload and Redpanda/Kafka outbox publishing are still required for a real deployment flow.
+- Video-service risk: upload idempotency, MinIO presigned URL and Redpanda/Kafka outbox publishing exist, but MinIO object metadata verification, richer outbox backoff controls, Kubernetes/GitOps manifests, and the `media-worker` processing contract are still pending.
 - Gateway risk: Redis-backed rate limiting and richer route/upstream metrics are still pending.
 - DevSecOps risk: security scans, CI, GitOps history, and deployment evidence must become real inputs to RCA, not decorative pipeline items.
 - AIOps risk: agent outputs must cite evidence and expose uncertainty to avoid fluent but unsupported conclusions.

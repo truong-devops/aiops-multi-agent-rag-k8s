@@ -35,10 +35,12 @@ As of 2026-07-01:
 - `[x]` Da co PostgreSQL migration cho `videos`, `upload_requests`, `video_assets`, `video_status_history`, `outbox_events`.
 - `[x]` Da co PostgreSQL repository cho video, upload request va status history.
 - `[x]` Da co `DATABASE_URL` config va startup wiring chon PostgreSQL khi co DSN.
-- `[ ]` Chua co MinIO presigned upload URL that.
+- `[x]` Da co MinIO/S3-compatible presigned upload URL khi cau hinh `MINIO_ENDPOINT`.
 - `[x]` Da co outbox event write cho `video.uploaded.v1` khi confirm upload.
-- `[ ]` Chua co Redpanda/Kafka publisher.
+- `[x]` Da co Redpanda/Kafka publisher worker doc outbox va mark `published` sau broker ack.
 - `[x]` Da co PostgreSQL integration test harness va local compose/CI wiring.
+- `[x]` Da co idempotency key cho upload request creation theo `(owner_id, idempotency_key)`.
+- `[x]` Da co owner/admin/internal authorization cho read, confirm va status update paths.
 
 ## Implemented API Surface
 
@@ -151,7 +153,7 @@ Do not include presigned URLs, tokens, credentials, or internal secrets in event
 - `[x]` Add basic metrics.
 - `[x]` Add tests for upload request and state transition flow.
 - `[ ]` Align upload confirmation route with final REST API naming if needed: current code uses `/uploaded`, docs also mention `/upload-completions`.
-- `[ ]` Add authorization checks for owner-only video mutation when gateway user context is finalized.
+- `[x]` Add authorization checks for owner/internal/admin video read, confirm va status update paths.
 
 Done criteria:
 
@@ -180,13 +182,13 @@ Done criteria:
 
 ## Phase 3: MinIO Upload Integration
 
-- `[ ]` Add MinIO/S3-compatible client configuration.
-- `[ ]` Add required config: endpoint, access key, secret key, raw bucket, URL expiry.
-- `[ ]` Generate presigned PUT URL for upload request.
-- `[ ]` Ensure bucket/object key are stored, presigned URL is not persisted.
+- `[x]` Add MinIO/S3-compatible client configuration.
+- `[x]` Add required config: endpoint, access key, secret key, raw bucket, URL expiry.
+- `[x]` Generate presigned PUT URL for upload request.
+- `[x]` Ensure bucket/object key are stored, presigned URL is not persisted.
 - `[ ]` Validate content type and expected size before creating upload intent.
 - `[ ]` Optionally verify object metadata when confirming upload.
-- `[ ]` Add failure mapping for MinIO unavailable, access denied and bucket missing.
+- `[~]` Add failure mapping for MinIO unavailable, access denied and bucket missing.
 
 Done criteria:
 
@@ -199,10 +201,10 @@ Done criteria:
 - `[x]` Write `video.uploaded.v1` into `outbox_events` in the same DB transaction as upload confirmation.
 - `[x]` Add outbox event domain model.
 - `[x]` Add event payload builder.
-- `[ ]` Add publisher worker for Redpanda/Kafka-compatible broker.
-- `[ ]` Mark outbox event `published` only after broker ack.
-- `[ ]` Add retry/backoff and `failed` status for publish failures.
-- `[ ]` Add metrics for pending, published and failed outbox events.
+- `[x]` Add publisher worker for Redpanda/Kafka-compatible broker.
+- `[x]` Mark outbox event `published` only after broker ack.
+- `[~]` Add retry/backoff and `failed` status for publish failures.
+- `[x]` Add metrics for listed, published and failed outbox publish outcomes.
 - `[x]` Add tests proving upload confirmation and outbox write are atomic.
 
 Done criteria:
@@ -215,7 +217,7 @@ Done criteria:
 
 - `[ ]` Define exact contract for `media-worker` to mark processing started, ready or failed.
 - `[ ]` Decide controlled update path: service API command, event command, or both with clear ownership.
-- `[ ]` Protect internal status update endpoint from public clients.
+- `[x]` Protect internal status update endpoint from public clients.
 - `[ ]` Add status reason and stable error code handling.
 - `[ ]` Add tests for worker-driven status transitions.
 
@@ -229,12 +231,12 @@ Done criteria:
 
 - `[x]` Add request counter and duration metrics.
 - `[x]` Preserve request ID and correlation ID.
-- `[ ]` Add structured logs with `service`, `environment`, `request_id`, `correlation_id`, `video_id`, `upload_request_id`.
-- `[ ]` Add metrics for upload request created/uploaded/expired.
+- `[~]` Add structured logs with `service`, `environment`, `request_id`, `correlation_id`, `video_id`, `upload_request_id`.
+- `[~]` Add metrics for upload request created/uploaded/expired.
 - `[ ]` Add metrics for video status transitions.
-- `[ ]` Add metrics for DB latency/errors.
-- `[ ]` Add metrics for MinIO presign/metadata failures.
-- `[ ]` Add metrics for outbox pending/published/failed.
+- `[x]` Add metrics for DB latency/errors.
+- `[~]` Add metrics for MinIO presign/metadata failures.
+- `[x]` Add metrics for outbox pending/published/failed.
 - `[ ]` Add optional OpenTelemetry trace propagation.
 
 Done criteria:
@@ -244,7 +246,7 @@ Done criteria:
 ## Phase 7: Deployment Readiness
 
 - `[x]` Dockerfile exists.
-- `[ ]` Add service env documentation for DB, MinIO, broker and mode.
+- `[x]` Add service env documentation for DB, MinIO, broker and mode.
 - `[ ]` Add Kubernetes/GitOps manifests in companion repo when ready.
 - `[ ]` Add resource requests/limits.
 - `[ ]` Add liveness/readiness probes.
@@ -261,16 +263,16 @@ Done criteria:
 
 Next best engineering task:
 
-1. Add an outbox publisher worker for Redpanda/Kafka.
-2. Add MinIO presigned upload URL generation.
-3. Add idempotency handling for upload request creation.
-4. Add owner/internal authorization checks for video mutation routes.
+1. Define the exact `media-worker` contract for processing started, ready and failed updates.
+2. Add tests for worker-driven internal status transitions.
+3. Optionally verify MinIO object metadata during upload confirmation.
+4. Add Kubernetes/GitOps manifests and smoke tests for the full upload-to-event flow.
 
 Reason:
 
-- PostgreSQL persistence and outbox write now have a repeatable local/CI integration test workflow.
-- The publisher is the next step that turns pending outbox rows into consumable broker events for `media-worker`.
-- MinIO presigned upload should follow once durable metadata and event intent are stable.
+- Upload intent persistence, MinIO presigned upload, idempotency and outbox publishing are implemented.
+- The next product risk is the handoff from `video-service` to `media-worker`.
+- Metadata verification and GitOps manifests will make the flow more realistic for incident generation.
 
 ## Update Rule
 

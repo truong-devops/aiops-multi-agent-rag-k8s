@@ -14,7 +14,7 @@ As of 2026-07-01:
 
 - `identity-service`: da co auth/profile/JWT/OAuth/JWKS/PostgreSQL/Redis-facing design o muc tot hon cac service khac.
 - `api-gateway`: da co routing, request/correlation ID, JWT verify qua JWKS, trusted user-context forwarding, readiness va basic metrics.
-- `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow va outbox write cho `video.uploaded.v1`; MinIO va Redpanda/Kafka publisher van chua lam.
+- `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow, upload idempotency, MinIO/S3 presigned upload URL, owner/internal authorization va Redpanda/Kafka outbox publisher cho `video.uploaded.v1`.
 - `media-worker`, `feed-social-service`, `live-service`: van chu yeu la skeleton.
 - `aiops-service`: da co package layout, chua co RCA pipeline that.
 
@@ -65,10 +65,10 @@ Detailed service checklist: `docs/development/video-service-implementation-plan.
 - `[x]` Add handler/service tests for first upload flow.
 - `[x]` Add PostgreSQL migration for `videos`, `upload_requests`, `video_assets`, `video_status_history`, `outbox_events`.
 - `[x]` Add PostgreSQL repository implementation.
-- `[ ]` Add idempotency handling for upload request creation.
-- `[ ]` Add MinIO presigned upload URL generation.
+- `[x]` Add idempotency handling for upload request creation.
+- `[x]` Add MinIO presigned upload URL generation.
 - `[x]` Add outbox write for `video.uploaded.v1`.
-- `[ ]` Add event publisher worker or publish path for Redpanda/Kafka.
+- `[x]` Add event publisher worker or publish path for Redpanda/Kafka.
 - `[x]` Add integration tests for database-backed flow.
 
 Done criteria:
@@ -210,10 +210,10 @@ Done criteria:
 
 ## Suggested Immediate Next Steps
 
-1. Add outbox publisher worker or publish path for Redpanda/Kafka.
-2. Add MinIO presigned upload URL generation.
-3. Start `media-worker` processing job model and state machine.
-4. Add idempotency handling for upload request creation.
+1. Start `media-worker` processing job model and state machine.
+2. Define the worker-to-`video-service` status update contract and tests.
+3. Add MinIO object metadata verification during upload confirmation if needed for stronger evidence.
+4. Add GitOps/Kubernetes manifests and smoke tests for the video upload-to-event flow.
 5. Keep gateway rate limiting as a hardening task after video flow has durable storage.
 
 ## Update Rule

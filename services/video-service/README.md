@@ -8,9 +8,10 @@ Runtime: Go `1.24`, toolchain `go1.24.13`, Docker builder `golang:1.24.13-alpine
 
 - Tạo upload request.
 - Lưu video metadata.
-- Sinh raw object key cho upload flow.
+- Sinh raw object key và presigned upload URL cho upload flow.
 - Confirm upload hoàn tất và chuyển video sang trạng thái `uploaded`.
 - Cập nhật trạng thái video theo state machine.
+- Ghi outbox event và publish sang Redpanda/Kafka khi bật worker.
 - Expose health, readiness và metrics.
 
 ## API
@@ -36,10 +37,22 @@ Public paths should be reached through `api-gateway` as `/api/v1/...`.
 | `ENVIRONMENT` | `local` | Runtime environment label. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 | `DATABASE_URL` | empty | PostgreSQL DSN. Required outside local/dev/test environments. |
+| `INTERNAL_API_TOKEN` | empty | Shared internal token for worker/internal status updates. Required outside local/dev/test environments. |
 | `RAW_VIDEO_BUCKET` | `raw-videos` | Bucket name used for raw upload object keys. |
-| `UPLOAD_URL_BASE` | empty | Optional local/dev upload base URL. This is not a real presigned URL implementation. |
+| `UPLOAD_URL_BASE` | empty | Optional local/dev upload base URL fallback when MinIO presigner is not configured. |
 | `UPLOAD_REQUEST_TTL` | `30m` | Upload request expiry duration. |
+| `PRESIGNED_UPLOAD_TTL` | `15m` | Presigned PUT URL expiry duration. |
 | `REQUEST_BODY_LIMIT_BYTES` | `1048576` | Max request body size. |
+| `MINIO_ENDPOINT` | empty | S3-compatible endpoint, for example `minio:9000`. When set, the service returns real SigV4 presigned PUT URLs. |
+| `MINIO_ACCESS_KEY` | empty | MinIO/S3 access key. Required when `MINIO_ENDPOINT` is set. |
+| `MINIO_SECRET_KEY` | empty | MinIO/S3 secret key. Required when `MINIO_ENDPOINT` is set. |
+| `MINIO_REGION` | `us-east-1` | S3 signing region. |
+| `MINIO_USE_SSL` | `false` | Use HTTPS for presigned URLs. |
+| `KAFKA_BROKERS` | empty | Comma-separated Redpanda/Kafka broker list. Required when outbox publisher is enabled. |
+| `VIDEO_EVENTS_TOPIC` | `video.events` | Kafka topic for video lifecycle events. |
+| `OUTBOX_PUBLISHER_ENABLED` | `false` | Enables the outbox publisher worker. |
+| `OUTBOX_POLL_INTERVAL` | `5s` | Outbox polling interval. |
+| `OUTBOX_BATCH_SIZE` | `25` | Max outbox events processed per poll. |
 
 ## Current Implementation
 
@@ -51,14 +64,18 @@ The service can run with either PostgreSQL or an in-memory repository.
 
 Implemented integration foundation:
 
+- Upload request creation supports `Idempotency-Key` per owner so retried client requests reuse the same upload intent.
+- When MinIO config is present, upload request creation returns a real S3-compatible SigV4 presigned PUT URL.
 - Confirm upload writes `video.uploaded.v1` into `outbox_events` in the same repository operation as upload/video status updates.
-- The outbox event is pending until a future publisher sends it to Redpanda/Kafka.
+- When `OUTBOX_PUBLISHER_ENABLED=true`, the outbox worker publishes envelopes to Redpanda/Kafka and marks events `published` only after broker ack.
+- Owner/admin/internal authorization is enforced for read, confirm and status update paths. Worker-driven status updates should use `X-Internal-Token`.
+- `/metrics` includes HTTP, upload, presign, outbox publish and DB operation counters.
 
 Production integration work still needs:
 
-- MinIO presigned upload URL generation.
-- Redpanda/Kafka event publishing for `video.uploaded`.
-- Redis idempotency cache for upload request creation.
+- Optional object metadata verification on upload confirmation.
+- Richer retry backoff controls for outbox failures.
+- Redis cache for short-lived upload intent/object metadata if the flow needs it later.
 
 ## State Machine
 
@@ -87,10 +104,9 @@ The current implementation records request ID, correlation ID, producer, environ
 
 ## Trách Nhiệm Chưa Làm
 
-- Tích hợp MinIO/presigned URL thật.
-- Publish event `video.uploaded`.
-- Outbox publisher worker.
-- Run database-backed integration tests in CI/local compose.
+- Verify object metadata from MinIO during confirm upload.
+- Add Kubernetes/GitOps manifests for DB, MinIO, Redpanda and service secrets.
+- Add smoke test script for the end-to-end upload request flow.
 
 ## Tests
 
