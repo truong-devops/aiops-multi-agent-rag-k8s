@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"mime"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/domain"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/event"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/repository"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/storage"
 )
 
 type VideoService struct {
@@ -19,6 +22,10 @@ type VideoService struct {
 	rawVideoBucket   string
 	uploadURLBase    string
 	uploadRequestTTL time.Duration
+	presignedTTL     time.Duration
+	uploadSigner     storage.UploadSigner
+	metrics          MetricsRecorder
+	logger           *slog.Logger
 	now              func() time.Time
 }
 
@@ -27,7 +34,24 @@ type Options struct {
 	RawVideoBucket   string
 	UploadURLBase    string
 	UploadRequestTTL time.Duration
+	PresignedTTL     time.Duration
+	UploadSigner     storage.UploadSigner
+	Metrics          MetricsRecorder
+	Logger           *slog.Logger
 	Now              func() time.Time
+}
+
+type MetricsRecorder interface {
+	RecordUploadRequest(outcome string)
+	RecordUploadConfirmation(outcome string)
+	RecordPresign(outcome string)
+	RecordDBOperation(operation string, outcome string, duration time.Duration)
+}
+
+type Actor struct {
+	UserID   string
+	Roles    []string
+	Internal bool
 }
 
 type CreateUploadRequestInput struct {
@@ -38,6 +62,8 @@ type CreateUploadRequestInput struct {
 	ContentType    string
 	SizeBytes      int64
 	ChecksumSHA256 string
+	IdempotencyKey string
+	Actor          Actor
 	RequestID      string
 	CorrelationID  string
 }
@@ -49,9 +75,11 @@ type UploadIntent struct {
 }
 
 type ConfirmUploadedInput struct {
+	VideoID         string
 	UploadRequestID string
 	SizeBytes       int64
 	ChecksumSHA256  string
+	Actor           Actor
 	RequestID       string
 	CorrelationID   string
 }
@@ -61,6 +89,7 @@ type UpdateStatusInput struct {
 	Status        string
 	Reason        string
 	ErrorCode     string
+	Actor         Actor
 	RequestID     string
 	CorrelationID string
 }
@@ -74,12 +103,24 @@ func NewVideoService(store repository.Store, options Options) *VideoService {
 	if ttl <= 0 {
 		ttl = 30 * time.Minute
 	}
+	presignedTTL := options.PresignedTTL
+	if presignedTTL <= 0 {
+		presignedTTL = 15 * time.Minute
+	}
+	logger := options.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &VideoService{
 		store:            store,
 		environment:      defaultEnvironment(options.Environment),
 		rawVideoBucket:   options.RawVideoBucket,
 		uploadURLBase:    strings.TrimRight(options.UploadURLBase, "/"),
 		uploadRequestTTL: ttl,
+		presignedTTL:     presignedTTL,
+		uploadSigner:     options.UploadSigner,
+		metrics:          options.Metrics,
+		logger:           logger,
 		now:              now,
 	}
 }
@@ -87,17 +128,28 @@ func NewVideoService(store repository.Store, options Options) *VideoService {
 func (s *VideoService) CreateUploadRequest(ctx context.Context, input CreateUploadRequestInput) (UploadIntent, error) {
 	ownerID := strings.TrimSpace(input.OwnerID)
 	if ownerID == "" {
+		ownerID = strings.TrimSpace(input.Actor.UserID)
+	}
+	if ownerID == "" {
+		s.recordUploadRequest("unauthorized")
 		return UploadIntent{}, domain.Unauthorized("User context is required.")
+	}
+	if !input.Actor.canWriteOwner(ownerID) && input.Actor.UserID != "" {
+		s.recordUploadRequest("forbidden")
+		return UploadIntent{}, domain.Forbidden("User cannot create upload requests for another owner.")
 	}
 	title := strings.TrimSpace(input.Title)
 	if title == "" {
+		s.recordUploadRequest("validation_error")
 		return UploadIntent{}, domain.ValidationError("title is required.")
 	}
 	contentType := strings.TrimSpace(input.ContentType)
 	if !validVideoContentType(contentType) {
+		s.recordUploadRequest("validation_error")
 		return UploadIntent{}, domain.ValidationError("content_type must be a supported video MIME type.")
 	}
 	if input.SizeBytes < 0 {
+		s.recordUploadRequest("validation_error")
 		return UploadIntent{}, domain.ValidationError("size_bytes must be greater than or equal to zero.")
 	}
 	visibility := strings.TrimSpace(input.Visibility)
@@ -105,7 +157,35 @@ func (s *VideoService) CreateUploadRequest(ctx context.Context, input CreateUplo
 		visibility = domain.VisibilityPrivate
 	}
 	if !domain.ValidVisibility(visibility) {
+		s.recordUploadRequest("validation_error")
 		return UploadIntent{}, domain.ValidationError("visibility is invalid.")
+	}
+	idempotencyKey := strings.TrimSpace(input.IdempotencyKey)
+	if idempotencyKey != "" {
+		startedAt := time.Now()
+		existingVideo, existingUpload, err := s.store.FindUploadIntentByIdempotencyKey(ctx, ownerID, idempotencyKey)
+		s.recordDBOperation("find_upload_intent_by_idempotency_key", startedAt, err)
+		if err == nil {
+			uploadURL, err := s.uploadURL(ctx, existingUpload)
+			if err != nil {
+				s.recordUploadRequest("presign_error")
+				return UploadIntent{}, err
+			}
+			s.recordUploadRequest("reused")
+			s.logger.Info(
+				"upload intent reused by idempotency key",
+				"video_id", existingVideo.ID,
+				"upload_request_id", existingUpload.ID,
+				"owner_id", existingVideo.OwnerID,
+				"request_id", input.RequestID,
+				"correlation_id", input.CorrelationID,
+			)
+			return UploadIntent{Video: existingVideo, UploadRequest: existingUpload, UploadURL: uploadURL}, nil
+		}
+		if !isNotFound(err) {
+			s.recordUploadRequest("db_error")
+			return UploadIntent{}, err
+		}
 	}
 
 	now := s.now().UTC()
@@ -132,6 +212,7 @@ func (s *VideoService) CreateUploadRequest(ctx context.Context, input CreateUplo
 		ID:             uploadID,
 		VideoID:        videoID,
 		OwnerID:        ownerID,
+		IdempotencyKey: idempotencyKey,
 		Bucket:         s.rawVideoBucket,
 		ObjectKey:      objectKey,
 		Status:         domain.UploadStatusCreated,
@@ -153,10 +234,28 @@ func (s *VideoService) CreateUploadRequest(ctx context.Context, input CreateUplo
 		CorrelationID: input.CorrelationID,
 		CreatedAt:     now,
 	}
+	startedAt := time.Now()
 	if err := s.store.CreateVideoWithUploadRequest(ctx, video, upload, history); err != nil {
+		s.recordDBOperation("create_upload_intent", startedAt, err)
+		s.recordUploadRequest("db_error")
 		return UploadIntent{}, err
 	}
-	return UploadIntent{Video: video, UploadRequest: upload, UploadURL: s.uploadURL(upload)}, nil
+	s.recordDBOperation("create_upload_intent", startedAt, nil)
+	uploadURL, err := s.uploadURL(ctx, upload)
+	if err != nil {
+		s.recordUploadRequest("presign_error")
+		return UploadIntent{}, err
+	}
+	s.recordUploadRequest("created")
+	s.logger.Info(
+		"upload intent created",
+		"video_id", video.ID,
+		"upload_request_id", upload.ID,
+		"owner_id", video.OwnerID,
+		"request_id", input.RequestID,
+		"correlation_id", input.CorrelationID,
+	)
+	return UploadIntent{Video: video, UploadRequest: upload, UploadURL: uploadURL}, nil
 }
 
 func (s *VideoService) ConfirmUploaded(ctx context.Context, input ConfirmUploadedInput) (domain.Video, error) {
@@ -164,26 +263,49 @@ func (s *VideoService) ConfirmUploaded(ctx context.Context, input ConfirmUploade
 	if uploadID == "" {
 		return domain.Video{}, domain.ValidationError("upload_request_id is required.")
 	}
+	startedAt := time.Now()
 	upload, err := s.store.FindUploadRequestByID(ctx, uploadID)
+	s.recordDBOperation("find_upload_request", startedAt, err)
 	if err != nil {
+		s.recordUploadConfirmation("db_error")
 		return domain.Video{}, err
 	}
+	if !input.Actor.canReadOwner(upload.OwnerID) {
+		s.recordUploadConfirmation("forbidden")
+		return domain.Video{}, actorError(input.Actor, "User cannot confirm this upload request.")
+	}
 	if upload.Status != domain.UploadStatusCreated {
+		s.recordUploadConfirmation("conflict")
 		return domain.Video{}, domain.Conflict(domain.CodeInvalidVideoState, "Upload request is not in created state.")
+	}
+	if strings.TrimSpace(input.VideoID) != "" && strings.TrimSpace(input.VideoID) != upload.VideoID {
+		s.recordUploadConfirmation("validation_error")
+		return domain.Video{}, domain.ValidationError("upload_request_id does not belong to the requested video.")
 	}
 	now := s.now().UTC()
 	if now.After(upload.ExpiresAt) {
 		upload.Status = domain.UploadStatusExpired
 		upload.UpdatedAt = now
-		_ = s.store.SaveUploadRequest(ctx, upload)
+		startedAt = time.Now()
+		err := s.store.SaveUploadRequest(ctx, upload)
+		s.recordDBOperation("expire_upload_request", startedAt, err)
+		s.recordUploadConfirmation("expired")
 		return domain.Video{}, domain.Conflict(domain.CodeInvalidVideoState, "Upload request has expired.")
 	}
 
+	startedAt = time.Now()
 	video, err := s.store.FindVideoByID(ctx, upload.VideoID)
+	s.recordDBOperation("find_video", startedAt, err)
 	if err != nil {
+		s.recordUploadConfirmation("db_error")
 		return domain.Video{}, err
 	}
+	if !input.Actor.canReadOwner(video.OwnerID) {
+		s.recordUploadConfirmation("forbidden")
+		return domain.Video{}, actorError(input.Actor, "User cannot confirm this video upload.")
+	}
 	if !domain.CanTransitionVideo(video.Status, domain.VideoStatusUploaded) {
+		s.recordUploadConfirmation("conflict")
 		return domain.Video{}, domain.Conflict(domain.CodeInvalidVideoState, "Video cannot transition to uploaded.")
 	}
 
@@ -218,9 +340,22 @@ func (s *VideoService) ConfirmUploaded(ctx context.Context, input ConfirmUploade
 	if err != nil {
 		return domain.Video{}, err
 	}
+	startedAt = time.Now()
 	if err := s.store.CompleteUpload(ctx, upload, video, history, outbox); err != nil {
+		s.recordDBOperation("complete_upload", startedAt, err)
+		s.recordUploadConfirmation("db_error")
 		return domain.Video{}, err
 	}
+	s.recordDBOperation("complete_upload", startedAt, nil)
+	s.recordUploadConfirmation("confirmed")
+	s.logger.Info(
+		"upload confirmed",
+		"video_id", video.ID,
+		"upload_request_id", upload.ID,
+		"owner_id", video.OwnerID,
+		"request_id", input.RequestID,
+		"correlation_id", input.CorrelationID,
+	)
 	return video, nil
 }
 
@@ -229,7 +364,21 @@ func (s *VideoService) GetVideo(ctx context.Context, id string) (domain.Video, e
 	if id == "" {
 		return domain.Video{}, domain.ValidationError("video_id is required.")
 	}
-	return s.store.FindVideoByID(ctx, id)
+	startedAt := time.Now()
+	video, err := s.store.FindVideoByID(ctx, id)
+	s.recordDBOperation("find_video", startedAt, err)
+	return video, err
+}
+
+func (s *VideoService) GetVideoForActor(ctx context.Context, id string, actor Actor) (domain.Video, error) {
+	video, err := s.GetVideo(ctx, id)
+	if err != nil {
+		return domain.Video{}, err
+	}
+	if !actor.canReadOwner(video.OwnerID) {
+		return domain.Video{}, actorError(actor, "User cannot access this video.")
+	}
+	return video, nil
 }
 
 func (s *VideoService) ListVideos(ctx context.Context, filter repository.ListVideosFilter) ([]domain.Video, error) {
@@ -242,7 +391,20 @@ func (s *VideoService) ListVideos(ctx context.Context, filter repository.ListVid
 	if filter.Limit > 100 {
 		filter.Limit = 100
 	}
-	return s.store.ListVideos(ctx, filter)
+	startedAt := time.Now()
+	videos, err := s.store.ListVideos(ctx, filter)
+	s.recordDBOperation("list_videos", startedAt, err)
+	return videos, err
+}
+
+func (s *VideoService) ListVideosForActor(ctx context.Context, filter repository.ListVideosFilter, actor Actor) ([]domain.Video, error) {
+	if !actor.isInternalOrAdmin() {
+		if strings.TrimSpace(actor.UserID) == "" {
+			return nil, domain.Unauthorized("User context is required.")
+		}
+		filter.OwnerID = actor.UserID
+	}
+	return s.ListVideos(ctx, filter)
 }
 
 func (s *VideoService) UpdateStatus(ctx context.Context, input UpdateStatusInput) (domain.Video, error) {
@@ -253,6 +415,9 @@ func (s *VideoService) UpdateStatus(ctx context.Context, input UpdateStatusInput
 	status := strings.TrimSpace(input.Status)
 	if !domain.ValidVideoStatus(status) {
 		return domain.Video{}, domain.ValidationError("status is invalid.")
+	}
+	if !input.Actor.canUpdateVideoStatus(video.OwnerID, status) {
+		return domain.Video{}, actorError(input.Actor, "User cannot update this video status.")
 	}
 	if !domain.CanTransitionVideo(video.Status, status) {
 		return domain.Video{}, domain.Conflict(domain.CodeInvalidVideoState, "Video state transition is invalid.")
@@ -285,9 +450,20 @@ func (s *VideoService) UpdateStatus(ctx context.Context, input UpdateStatusInput
 		CorrelationID:  input.CorrelationID,
 		CreatedAt:      now,
 	}
+	startedAt := time.Now()
 	if err := s.store.SaveVideoStatus(ctx, video, history); err != nil {
+		s.recordDBOperation("save_video_status", startedAt, err)
 		return domain.Video{}, err
 	}
+	s.recordDBOperation("save_video_status", startedAt, nil)
+	s.logger.Info(
+		"video status updated",
+		"video_id", video.ID,
+		"owner_id", video.OwnerID,
+		"status", video.Status,
+		"request_id", input.RequestID,
+		"correlation_id", input.CorrelationID,
+	)
 	return video, nil
 }
 
@@ -295,11 +471,27 @@ func (s *VideoService) Ready(ctx context.Context) error {
 	return s.store.Ping(ctx)
 }
 
-func (s *VideoService) uploadURL(upload domain.UploadRequest) string {
-	if s.uploadURLBase == "" {
-		return ""
+func (s *VideoService) uploadURL(ctx context.Context, upload domain.UploadRequest) (string, error) {
+	if s.uploadSigner != nil {
+		url, err := s.uploadSigner.PresignPutObject(ctx, storage.PresignPutObjectInput{
+			Bucket:      upload.Bucket,
+			ObjectKey:   upload.ObjectKey,
+			ContentType: upload.ContentType,
+			Expires:     s.presignedTTL,
+			Now:         s.now().UTC(),
+		})
+		if err != nil {
+			s.recordPresign("error")
+			return "", err
+		}
+		s.recordPresign("success")
+		return url, nil
 	}
-	return fmt.Sprintf("%s/%s/%s", s.uploadURLBase, upload.Bucket, upload.ObjectKey)
+	if s.uploadURLBase == "" {
+		return "", nil
+	}
+	s.recordPresign("local_fallback")
+	return fmt.Sprintf("%s/%s/%s", s.uploadURLBase, upload.Bucket, upload.ObjectKey), nil
 }
 
 func rawObjectKey(videoID string, contentType string) string {
@@ -326,4 +518,84 @@ func defaultEnvironment(environment string) string {
 		return "local"
 	}
 	return environment
+}
+
+func (a Actor) isInternalOrAdmin() bool {
+	if a.Internal {
+		return true
+	}
+	for _, role := range a.Roles {
+		role = strings.ToLower(strings.TrimSpace(role))
+		if role == "admin" || role == "video_admin" {
+			return true
+		}
+	}
+	return false
+}
+
+func (a Actor) canReadOwner(ownerID string) bool {
+	if a.isInternalOrAdmin() {
+		return true
+	}
+	return strings.TrimSpace(a.UserID) != "" && strings.TrimSpace(a.UserID) == strings.TrimSpace(ownerID)
+}
+
+func (a Actor) canWriteOwner(ownerID string) bool {
+	if a.isInternalOrAdmin() {
+		return true
+	}
+	return strings.TrimSpace(a.UserID) == "" || strings.TrimSpace(a.UserID) == strings.TrimSpace(ownerID)
+}
+
+func (a Actor) canUpdateVideoStatus(ownerID string, status string) bool {
+	if a.isInternalOrAdmin() {
+		return true
+	}
+	return strings.TrimSpace(a.UserID) != "" &&
+		strings.TrimSpace(a.UserID) == strings.TrimSpace(ownerID) &&
+		strings.TrimSpace(status) == domain.VideoStatusDeleted
+}
+
+func actorError(actor Actor, forbiddenMessage string) error {
+	if strings.TrimSpace(actor.UserID) == "" && !actor.Internal {
+		return domain.Unauthorized("User context is required.")
+	}
+	return domain.Forbidden(forbiddenMessage)
+}
+
+func isNotFound(err error) bool {
+	var appErr *domain.AppError
+	return errors.As(err, &appErr) && appErr.Status == 404
+}
+
+func (s *VideoService) recordUploadRequest(outcome string) {
+	if s.metrics != nil {
+		s.metrics.RecordUploadRequest(outcome)
+	}
+}
+
+func (s *VideoService) recordUploadConfirmation(outcome string) {
+	if s.metrics != nil {
+		s.metrics.RecordUploadConfirmation(outcome)
+	}
+}
+
+func (s *VideoService) recordPresign(outcome string) {
+	if s.metrics != nil {
+		s.metrics.RecordPresign(outcome)
+	}
+}
+
+func (s *VideoService) recordDBOperation(operation string, startedAt time.Time, err error) {
+	if s.metrics == nil {
+		return
+	}
+	outcome := "success"
+	if err != nil && !isNotFound(err) {
+		outcome = "error"
+	}
+	if isNotFound(err) {
+		outcome = "not_found"
+	}
+	s.metrics.RecordDBOperation(operation, outcome, time.Since(startedAt))
 }

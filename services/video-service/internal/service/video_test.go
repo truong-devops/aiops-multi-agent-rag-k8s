@@ -46,6 +46,7 @@ func TestCreateUploadRequestAndConfirmUploaded(t *testing.T) {
 	uploaded, err := service.ConfirmUploaded(context.Background(), ConfirmUploadedInput{
 		UploadRequestID: intent.UploadRequest.ID,
 		SizeBytes:       2048,
+		Actor:           Actor{UserID: "usr_123"},
 		RequestID:       "req_124",
 		CorrelationID:   "corr_123",
 	})
@@ -96,8 +97,60 @@ func TestUpdateStatusRejectsInvalidTransition(t *testing.T) {
 	if _, err := service.UpdateStatus(context.Background(), UpdateStatusInput{
 		VideoID: intent.Video.ID,
 		Status:  domain.VideoStatusReady,
+		Actor:   Actor{Internal: true},
 	}); err == nil {
 		t.Fatal("UpdateStatus() error = nil, want invalid transition")
+	}
+}
+
+func TestCreateUploadRequestReusesIdempotencyKey(t *testing.T) {
+	store := repository.NewMemoryStore()
+	service := NewVideoService(store, Options{
+		RawVideoBucket:   "raw-videos",
+		UploadURLBase:    "http://minio.local",
+		UploadRequestTTL: time.Hour,
+	})
+
+	input := CreateUploadRequestInput{
+		OwnerID:        "usr_123",
+		Title:          "Launch video",
+		ContentType:    "video/mp4",
+		IdempotencyKey: "idem_123",
+		Actor:          Actor{UserID: "usr_123"},
+	}
+	first, err := service.CreateUploadRequest(context.Background(), input)
+	if err != nil {
+		t.Fatalf("first CreateUploadRequest() error = %v", err)
+	}
+	second, err := service.CreateUploadRequest(context.Background(), input)
+	if err != nil {
+		t.Fatalf("second CreateUploadRequest() error = %v", err)
+	}
+	if second.Video.ID != first.Video.ID || second.UploadRequest.ID != first.UploadRequest.ID {
+		t.Fatalf("idempotent intent mismatch: first=%s/%s second=%s/%s", first.Video.ID, first.UploadRequest.ID, second.Video.ID, second.UploadRequest.ID)
+	}
+}
+
+func TestOwnerCannotUpdateProcessingStatus(t *testing.T) {
+	store := repository.NewMemoryStore()
+	service := NewVideoService(store, Options{RawVideoBucket: "raw-videos"})
+
+	intent, err := service.CreateUploadRequest(context.Background(), CreateUploadRequestInput{
+		OwnerID:     "usr_123",
+		Title:       "Launch video",
+		ContentType: "video/mp4",
+		Actor:       Actor{UserID: "usr_123"},
+	})
+	if err != nil {
+		t.Fatalf("CreateUploadRequest() error = %v", err)
+	}
+
+	if _, err := service.UpdateStatus(context.Background(), UpdateStatusInput{
+		VideoID: intent.Video.ID,
+		Status:  domain.VideoStatusProcessing,
+		Actor:   Actor{UserID: "usr_123"},
+	}); err == nil {
+		t.Fatal("UpdateStatus() error = nil, want forbidden")
 	}
 }
 

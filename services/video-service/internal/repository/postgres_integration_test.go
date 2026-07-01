@@ -158,7 +158,7 @@ func TestPostgresStoreUploadFlowWithOutbox(t *testing.T) {
 
 func applyVideoMigrations(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, name := range []string{"001_video_schema.sql", "002_outbox_envelope.sql"} {
+	for _, name := range []string{"001_video_schema.sql", "002_outbox_envelope.sql", "003_idempotency_outbox_attempts.sql"} {
 		path := filepath.Join("..", "..", "migrations", name)
 		content, err := os.ReadFile(path)
 		if err != nil {

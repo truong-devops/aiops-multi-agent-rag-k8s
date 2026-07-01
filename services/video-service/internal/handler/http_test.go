@@ -66,6 +66,7 @@ func TestVideoUploadFlow(t *testing.T) {
 	)
 	confirmReq.Header.Set("X-Request-ID", "req_confirm")
 	confirmReq.Header.Set("X-Correlation-ID", "corr_video")
+	confirmReq.Header.Set("X-User-ID", "usr_123")
 	confirmRec := httptest.NewRecorder()
 
 	app.ServeHTTP(confirmRec, confirmReq)
@@ -88,6 +89,7 @@ func TestVideoUploadFlow(t *testing.T) {
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/v1/videos/"+created.Data.Video.ID, nil)
+	getReq.Header.Set("X-User-ID", "usr_123")
 	getRec := httptest.NewRecorder()
 	app.ServeHTTP(getRec, getReq)
 
@@ -112,6 +114,7 @@ func TestCreateUploadRequestRequiresUserContext(t *testing.T) {
 func TestListVideos(t *testing.T) {
 	app := newTestApp()
 	req := httptest.NewRequest(http.MethodGet, "/v1/videos?limit=10", nil)
+	req.Header.Set("X-User-ID", "usr_123")
 	rec := httptest.NewRecorder()
 
 	app.ServeHTTP(rec, req)

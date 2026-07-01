@@ -17,11 +17,20 @@ import (
 )
 
 type Handler struct {
-	videos *service.VideoService
+	videos           *service.VideoService
+	internalAPIToken string
 }
 
-func New(videos *service.VideoService) *Handler {
-	return &Handler{videos: videos}
+type Options struct {
+	InternalAPIToken string
+}
+
+func New(videos *service.VideoService, options ...Options) *Handler {
+	var cfg Options
+	if len(options) > 0 {
+		cfg = options[0]
+	}
+	return &Handler{videos: videos, internalAPIToken: strings.TrimSpace(cfg.InternalAPIToken)}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, metrics http.HandlerFunc) {
@@ -74,6 +83,8 @@ func (h *Handler) createUploadRequest(w http.ResponseWriter, req *http.Request) 
 		ContentType:    body.ContentType,
 		SizeBytes:      body.SizeBytes,
 		ChecksumSHA256: body.ChecksumSHA256,
+		IdempotencyKey: strings.TrimSpace(req.Header.Get("Idempotency-Key")),
+		Actor:          actorFromRequest(req, h.internalAPIToken),
 		RequestID:      observability.RequestIDFromContext(req.Context()),
 		CorrelationID:  observability.CorrelationIDFromContext(req.Context()),
 	})
@@ -95,11 +106,11 @@ func (h *Handler) videosCollection(w http.ResponseWriter, req *http.Request) {
 			writeError(w, req, err)
 			return
 		}
-		videos, err := h.videos.ListVideos(req.Context(), repository.ListVideosFilter{
+		videos, err := h.videos.ListVideosForActor(req.Context(), repository.ListVideosFilter{
 			OwnerID: strings.TrimSpace(req.URL.Query().Get("owner_id")),
 			Status:  strings.TrimSpace(req.URL.Query().Get("status")),
 			Limit:   limit,
-		})
+		}, actorFromRequest(req, h.internalAPIToken))
 		if err != nil {
 			writeError(w, req, err)
 			return
@@ -138,7 +149,7 @@ func (h *Handler) videoByID(w http.ResponseWriter, req *http.Request) {
 
 	switch req.Method {
 	case http.MethodGet:
-		video, err := h.videos.GetVideo(req.Context(), videoID)
+		video, err := h.videos.GetVideoForActor(req.Context(), videoID, actorFromRequest(req, h.internalAPIToken))
 		if err != nil {
 			writeError(w, req, err)
 			return
@@ -149,7 +160,7 @@ func (h *Handler) videoByID(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func (h *Handler) confirmUploaded(w http.ResponseWriter, req *http.Request, _ string) {
+func (h *Handler) confirmUploaded(w http.ResponseWriter, req *http.Request, videoID string) {
 	if !requireMethod(w, req, http.MethodPost) {
 		return
 	}
@@ -162,9 +173,11 @@ func (h *Handler) confirmUploaded(w http.ResponseWriter, req *http.Request, _ st
 		return
 	}
 	video, err := h.videos.ConfirmUploaded(req.Context(), service.ConfirmUploadedInput{
+		VideoID:         videoID,
 		UploadRequestID: body.UploadRequestID,
 		SizeBytes:       body.SizeBytes,
 		ChecksumSHA256:  body.ChecksumSHA256,
+		Actor:           actorFromRequest(req, h.internalAPIToken),
 		RequestID:       observability.RequestIDFromContext(req.Context()),
 		CorrelationID:   observability.CorrelationIDFromContext(req.Context()),
 	})
@@ -192,6 +205,7 @@ func (h *Handler) updateStatus(w http.ResponseWriter, req *http.Request, videoID
 		Status:        body.Status,
 		Reason:        body.Reason,
 		ErrorCode:     body.ErrorCode,
+		Actor:         actorFromRequest(req, h.internalAPIToken),
 		RequestID:     observability.RequestIDFromContext(req.Context()),
 		CorrelationID: observability.CorrelationIDFromContext(req.Context()),
 	})
@@ -285,6 +299,25 @@ func methodNotAllowed(w http.ResponseWriter, req *http.Request) {
 
 func userID(req *http.Request) string {
 	return strings.TrimSpace(req.Header.Get("X-User-ID"))
+}
+
+func actorFromRequest(req *http.Request, internalAPIToken string) service.Actor {
+	roles := make([]string, 0)
+	for _, role := range strings.Split(req.Header.Get("X-User-Roles"), ",") {
+		role = strings.TrimSpace(role)
+		if role != "" {
+			roles = append(roles, role)
+		}
+	}
+	internal := false
+	if internalAPIToken != "" && strings.TrimSpace(req.Header.Get("X-Internal-Token")) == internalAPIToken {
+		internal = true
+	}
+	return service.Actor{
+		UserID:   userID(req),
+		Roles:    roles,
+		Internal: internal,
+	}
 }
 
 func parseLimit(value string) (int, error) {

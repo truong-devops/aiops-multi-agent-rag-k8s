@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/domain"
 )
@@ -74,6 +75,22 @@ func (s *MemoryStore) FindUploadRequestByID(_ context.Context, id string) (domai
 	return upload, nil
 }
 
+func (s *MemoryStore) FindUploadIntentByIdempotencyKey(_ context.Context, ownerID string, idempotencyKey string) (domain.Video, domain.UploadRequest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, upload := range s.uploads {
+		if upload.OwnerID != ownerID || upload.IdempotencyKey != idempotencyKey {
+			continue
+		}
+		video, ok := s.videos[upload.VideoID]
+		if !ok {
+			return domain.Video{}, domain.UploadRequest{}, domain.NotFound(domain.CodeVideoNotFound, "Video was not found.")
+		}
+		return video, upload, nil
+	}
+	return domain.Video{}, domain.UploadRequest{}, domain.NotFound(domain.CodeUploadRequestNotFound, "Upload request was not found.")
+}
+
 func (s *MemoryStore) SaveUploadRequest(_ context.Context, upload domain.UploadRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -111,4 +128,54 @@ func (s *MemoryStore) OutboxEvents() []domain.OutboxEvent {
 	events := make([]domain.OutboxEvent, len(s.outboxEvents))
 	copy(events, s.outboxEvents)
 	return events
+}
+
+func (s *MemoryStore) ListPendingOutboxEvents(_ context.Context, limit int) ([]domain.OutboxEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if limit <= 0 {
+		limit = 25
+	}
+	events := make([]domain.OutboxEvent, 0, limit)
+	for _, event := range s.outboxEvents {
+		if event.Status != domain.OutboxStatusPending {
+			continue
+		}
+		events = append(events, event)
+		if len(events) >= limit {
+			break
+		}
+	}
+	return events, nil
+}
+
+func (s *MemoryStore) MarkOutboxPublished(_ context.Context, id string, publishedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, event := range s.outboxEvents {
+		if event.ID != id {
+			continue
+		}
+		event.Status = domain.OutboxStatusPublished
+		event.PublishedAt = &publishedAt
+		s.outboxEvents[index] = event
+		return nil
+	}
+	return domain.NotFound(domain.CodeVideoNotFound, "Outbox event was not found.")
+}
+
+func (s *MemoryStore) MarkOutboxFailed(_ context.Context, id string, errMessage string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, event := range s.outboxEvents {
+		if event.ID != id {
+			continue
+		}
+		event.Status = domain.OutboxStatusFailed
+		event.Attempts++
+		event.LastError = errMessage
+		s.outboxEvents[index] = event
+		return nil
+	}
+	return domain.NotFound(domain.CodeVideoNotFound, "Outbox event was not found.")
 }

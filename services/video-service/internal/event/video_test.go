@@ -42,4 +42,15 @@ func TestNewVideoUploadedOutbox(t *testing.T) {
 	if payload.VideoID != "vid_123" || payload.OwnerID != "usr_123" || payload.RawObjectKey == "" {
 		t.Fatalf("payload = %#v", payload)
 	}
+
+	envelope, err := NewEnvelope(event)
+	if err != nil {
+		t.Fatalf("NewEnvelope() error = %v", err)
+	}
+	if envelope.EventID != event.ID || envelope.EventType != VideoUploadedFullName {
+		t.Fatalf("envelope = %#v", envelope)
+	}
+	if string(envelope.Payload) == "" {
+		t.Fatal("envelope payload is empty")
+	}
 }

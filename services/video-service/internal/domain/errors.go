@@ -5,6 +5,7 @@ import "net/http"
 const (
 	CodeValidationError       = "VALIDATION_ERROR"
 	CodeUnauthorized          = "UNAUTHORIZED"
+	CodeForbidden             = "FORBIDDEN"
 	CodeVideoNotFound         = "VIDEO_NOT_FOUND"
 	CodeUploadRequestNotFound = "UPLOAD_REQUEST_NOT_FOUND"
 	CodeInvalidVideoState     = "INVALID_VIDEO_STATE"
@@ -34,6 +35,10 @@ func ValidationError(message string) *AppError {
 
 func Unauthorized(message string) *AppError {
 	return NewError(http.StatusUnauthorized, CodeUnauthorized, message)
+}
+
+func Forbidden(message string) *AppError {
+	return NewError(http.StatusForbidden, CodeForbidden, message)
 }
 
 func NotFound(code string, message string) *AppError {

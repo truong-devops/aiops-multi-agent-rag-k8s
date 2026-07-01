@@ -52,6 +52,7 @@ type UploadRequest struct {
 	ID             string
 	VideoID        string
 	OwnerID        string
+	IdempotencyKey string
 	Bucket         string
 	ObjectKey      string
 	Status         string
@@ -92,6 +93,8 @@ type OutboxEvent struct {
 	OccurredAt    time.Time
 	PublishedAt   *time.Time
 	CreatedAt     time.Time
+	Attempts      int
+	LastError     string
 }
 
 func ValidVisibility(value string) bool {
