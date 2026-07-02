@@ -25,6 +25,7 @@ type Config struct {
 	MinIOSecretKey        string
 	MinIORegion           string
 	MinIOUseSSL           bool
+	VerifyUploadObject    bool
 	KafkaBrokers          []string
 	VideoEventsTopic      string
 	OutboxPublisher       bool
@@ -49,6 +50,7 @@ func Load() (Config, error) {
 		MinIOSecretKey:        strings.TrimSpace(os.Getenv("MINIO_SECRET_KEY")),
 		MinIORegion:           getenv("MINIO_REGION", "us-east-1"),
 		MinIOUseSSL:           parseBool(getenv("MINIO_USE_SSL", "false")),
+		VerifyUploadObject:    parseBool(getenv("VERIFY_UPLOAD_OBJECT", "false")),
 		KafkaBrokers:          parseCSV(os.Getenv("KAFKA_BROKERS")),
 		VideoEventsTopic:      getenv("VIDEO_EVENTS_TOPIC", "video.events"),
 		OutboxPublisher:       parseBool(getenv("OUTBOX_PUBLISHER_ENABLED", "false")),
@@ -93,6 +95,9 @@ func (c Config) Validate() error {
 	}
 	if c.UseMinIOPresigner() && (strings.TrimSpace(c.MinIOAccessKey) == "" || strings.TrimSpace(c.MinIOSecretKey) == "") {
 		return fmt.Errorf("MINIO_ACCESS_KEY and MINIO_SECRET_KEY are required when MINIO_ENDPOINT is set")
+	}
+	if c.VerifyUploadObject && !c.UseMinIOPresigner() {
+		return fmt.Errorf("MINIO_ENDPOINT is required when VERIFY_UPLOAD_OBJECT=true")
 	}
 	if !c.IsLocal() && strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("DATABASE_URL is required when ENVIRONMENT=%s", c.Environment)

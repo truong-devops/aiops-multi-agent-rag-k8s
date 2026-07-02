@@ -23,7 +23,7 @@ Service nay khong xu ly FFmpeg, khong quan ly retry worker, khong ghi feed/socia
 
 ## Current Snapshot
 
-As of 2026-07-01:
+As of 2026-07-02:
 
 - `[x]` Da co Go service layout theo huong production: `cmd/server`, `internal/config`, `internal/domain`, `internal/handler`, `internal/observability`, `internal/repository`, `internal/service`, `migrations`, `tests`.
 - `[x]` Da co domain model cho video, upload request va status history.
@@ -41,6 +41,7 @@ As of 2026-07-01:
 - `[x]` Da co PostgreSQL integration test harness va local compose/CI wiring.
 - `[x]` Da co idempotency key cho upload request creation theo `(owner_id, idempotency_key)`.
 - `[x]` Da co owner/admin/internal authorization cho read, confirm va status update paths.
+- `[x]` Da co optional MinIO/S3 object metadata verification khi confirm upload.
 
 ## Implemented API Surface
 
@@ -186,9 +187,9 @@ Done criteria:
 - `[x]` Add required config: endpoint, access key, secret key, raw bucket, URL expiry.
 - `[x]` Generate presigned PUT URL for upload request.
 - `[x]` Ensure bucket/object key are stored, presigned URL is not persisted.
-- `[ ]` Validate content type and expected size before creating upload intent.
-- `[ ]` Optionally verify object metadata when confirming upload.
-- `[~]` Add failure mapping for MinIO unavailable, access denied and bucket missing.
+- `[x]` Validate content type and expected size before creating upload intent.
+- `[x]` Optionally verify object metadata when confirming upload.
+- `[x]` Add failure mapping for MinIO unavailable, access denied and bucket missing.
 
 Done criteria:
 
@@ -218,8 +219,8 @@ Done criteria:
 - `[ ]` Define exact contract for `media-worker` to mark processing started, ready or failed.
 - `[ ]` Decide controlled update path: service API command, event command, or both with clear ownership.
 - `[x]` Protect internal status update endpoint from public clients.
-- `[ ]` Add status reason and stable error code handling.
-- `[ ]` Add tests for worker-driven status transitions.
+- `[~]` Add status reason and stable error code handling.
+- `[x]` Add tests for worker-driven status transitions.
 
 Done criteria:
 
@@ -231,11 +232,11 @@ Done criteria:
 
 - `[x]` Add request counter and duration metrics.
 - `[x]` Preserve request ID and correlation ID.
-- `[~]` Add structured logs with `service`, `environment`, `request_id`, `correlation_id`, `video_id`, `upload_request_id`.
+- `[x]` Add structured logs with `service`, `environment`, `request_id`, `correlation_id`, `video_id`, `upload_request_id`.
 - `[~]` Add metrics for upload request created/uploaded/expired.
-- `[ ]` Add metrics for video status transitions.
+- `[x]` Add metrics for video status transitions.
 - `[x]` Add metrics for DB latency/errors.
-- `[~]` Add metrics for MinIO presign/metadata failures.
+- `[x]` Add metrics for MinIO presign/metadata failures.
 - `[x]` Add metrics for outbox pending/published/failed.
 - `[ ]` Add optional OpenTelemetry trace propagation.
 
@@ -264,15 +265,15 @@ Done criteria:
 Next best engineering task:
 
 1. Define the exact `media-worker` contract for processing started, ready and failed updates.
-2. Add tests for worker-driven internal status transitions.
-3. Optionally verify MinIO object metadata during upload confirmation.
-4. Add Kubernetes/GitOps manifests and smoke tests for the full upload-to-event flow.
+2. Decide whether status updates remain HTTP-internal API only or also support worker result events.
+3. Add Kubernetes/GitOps manifests and smoke tests for the full upload-to-event flow.
+4. Move to `media-worker` implementation so uploaded videos can progress to processing and ready/failed.
 
 Reason:
 
 - Upload intent persistence, MinIO presigned upload, idempotency and outbox publishing are implemented.
 - The next product risk is the handoff from `video-service` to `media-worker`.
-- Metadata verification and GitOps manifests will make the flow more realistic for incident generation.
+- Metadata verification is implemented; GitOps manifests and `media-worker` behavior will make the flow more realistic for incident generation.
 
 ## Update Rule
 

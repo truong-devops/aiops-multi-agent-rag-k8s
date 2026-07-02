@@ -43,6 +43,15 @@ func TestValidateRequiresMinIOCredentials(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresMinIOWhenObjectVerificationEnabled(t *testing.T) {
+	cfg := validConfig("local")
+	cfg.VerifyUploadObject = true
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing MINIO_ENDPOINT error")
+	}
+}
+
 func TestValidateRequiresKafkaWhenOutboxPublisherEnabled(t *testing.T) {
 	cfg := validConfig("local")
 	cfg.OutboxPublisher = true

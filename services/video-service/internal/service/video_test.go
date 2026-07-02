@@ -9,6 +9,7 @@ import (
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/domain"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/event"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/repository"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/video-service/internal/storage"
 )
 
 func TestCreateUploadRequestAndConfirmUploaded(t *testing.T) {
@@ -103,6 +104,115 @@ func TestUpdateStatusRejectsInvalidTransition(t *testing.T) {
 	}
 }
 
+func TestConfirmUploadedVerifiesObjectMetadata(t *testing.T) {
+	store := repository.NewMemoryStore()
+	verifier := &fakeObjectVerifier{
+		metadata: storage.ObjectMetadata{SizeBytes: 2048, ContentType: "video/mp4"},
+	}
+	service := NewVideoService(store, Options{
+		RawVideoBucket: "raw-videos",
+		ObjectVerifier: verifier,
+	})
+
+	intent, err := service.CreateUploadRequest(context.Background(), CreateUploadRequestInput{
+		OwnerID:     "usr_123",
+		Title:       "Launch video",
+		ContentType: "video/mp4",
+		Actor:       Actor{UserID: "usr_123"},
+	})
+	if err != nil {
+		t.Fatalf("CreateUploadRequest() error = %v", err)
+	}
+
+	uploaded, err := service.ConfirmUploaded(context.Background(), ConfirmUploadedInput{
+		VideoID:         intent.Video.ID,
+		UploadRequestID: intent.UploadRequest.ID,
+		Actor:           Actor{UserID: "usr_123"},
+	})
+	if err != nil {
+		t.Fatalf("ConfirmUploaded() error = %v", err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("verifier calls = %d, want 1", verifier.calls)
+	}
+	if uploaded.SizeBytes != 2048 {
+		t.Fatalf("uploaded size = %d, want metadata size 2048", uploaded.SizeBytes)
+	}
+}
+
+func TestConfirmUploadedRejectsObjectMetadataMismatch(t *testing.T) {
+	store := repository.NewMemoryStore()
+	service := NewVideoService(store, Options{
+		RawVideoBucket: "raw-videos",
+		ObjectVerifier: &fakeObjectVerifier{
+			metadata: storage.ObjectMetadata{SizeBytes: 2048, ContentType: "video/mp4"},
+		},
+	})
+
+	intent, err := service.CreateUploadRequest(context.Background(), CreateUploadRequestInput{
+		OwnerID:     "usr_123",
+		Title:       "Launch video",
+		ContentType: "video/mp4",
+		Actor:       Actor{UserID: "usr_123"},
+	})
+	if err != nil {
+		t.Fatalf("CreateUploadRequest() error = %v", err)
+	}
+
+	if _, err := service.ConfirmUploaded(context.Background(), ConfirmUploadedInput{
+		VideoID:         intent.Video.ID,
+		UploadRequestID: intent.UploadRequest.ID,
+		SizeBytes:       1024,
+		Actor:           Actor{UserID: "usr_123"},
+	}); err == nil {
+		t.Fatal("ConfirmUploaded() error = nil, want metadata mismatch")
+	}
+}
+
+func TestInternalActorCanDriveProcessingStatusFlow(t *testing.T) {
+	store := repository.NewMemoryStore()
+	service := NewVideoService(store, Options{RawVideoBucket: "raw-videos"})
+
+	intent, err := service.CreateUploadRequest(context.Background(), CreateUploadRequestInput{
+		OwnerID:     "usr_123",
+		Title:       "Launch video",
+		ContentType: "video/mp4",
+		Actor:       Actor{UserID: "usr_123"},
+	})
+	if err != nil {
+		t.Fatalf("CreateUploadRequest() error = %v", err)
+	}
+	uploaded, err := service.ConfirmUploaded(context.Background(), ConfirmUploadedInput{
+		VideoID:         intent.Video.ID,
+		UploadRequestID: intent.UploadRequest.ID,
+		Actor:           Actor{UserID: "usr_123"},
+	})
+	if err != nil {
+		t.Fatalf("ConfirmUploaded() error = %v", err)
+	}
+	processing, err := service.UpdateStatus(context.Background(), UpdateStatusInput{
+		VideoID: uploaded.ID,
+		Status:  domain.VideoStatusProcessing,
+		Reason:  "worker_started",
+		Actor:   Actor{Internal: true},
+	})
+	if err != nil {
+		t.Fatalf("UpdateStatus(processing) error = %v", err)
+	}
+	ready, err := service.UpdateStatus(context.Background(), UpdateStatusInput{
+		VideoID: processing.ID,
+		Status:  domain.VideoStatusReady,
+		Reason:  "worker_completed",
+		Actor:   Actor{Internal: true},
+	})
+	if err != nil {
+		t.Fatalf("UpdateStatus(ready) error = %v", err)
+	}
+	if ready.Status != domain.VideoStatusReady {
+		t.Fatalf("ready status = %q", ready.Status)
+	}
+}
+
 func TestCreateUploadRequestReusesIdempotencyKey(t *testing.T) {
 	store := repository.NewMemoryStore()
 	service := NewVideoService(store, Options{
@@ -163,4 +273,15 @@ func TestCreateUploadRequestRequiresOwner(t *testing.T) {
 	}); err == nil {
 		t.Fatal("CreateUploadRequest() error = nil, want unauthorized")
 	}
+}
+
+type fakeObjectVerifier struct {
+	metadata storage.ObjectMetadata
+	err      error
+	calls    int
+}
+
+func (f *fakeObjectVerifier) VerifyObject(_ context.Context, _ storage.VerifyObjectInput) (storage.ObjectMetadata, error) {
+	f.calls++
+	return f.metadata, f.err
 }

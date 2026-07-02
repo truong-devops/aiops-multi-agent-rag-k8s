@@ -24,6 +24,7 @@ type VideoService struct {
 	uploadRequestTTL time.Duration
 	presignedTTL     time.Duration
 	uploadSigner     storage.UploadSigner
+	objectVerifier   storage.ObjectVerifier
 	metrics          MetricsRecorder
 	logger           *slog.Logger
 	now              func() time.Time
@@ -36,6 +37,7 @@ type Options struct {
 	UploadRequestTTL time.Duration
 	PresignedTTL     time.Duration
 	UploadSigner     storage.UploadSigner
+	ObjectVerifier   storage.ObjectVerifier
 	Metrics          MetricsRecorder
 	Logger           *slog.Logger
 	Now              func() time.Time
@@ -45,6 +47,8 @@ type MetricsRecorder interface {
 	RecordUploadRequest(outcome string)
 	RecordUploadConfirmation(outcome string)
 	RecordPresign(outcome string)
+	RecordObjectVerification(outcome string)
+	RecordStatusTransition(from string, to string, outcome string)
 	RecordDBOperation(operation string, outcome string, duration time.Duration)
 }
 
@@ -119,6 +123,7 @@ func NewVideoService(store repository.Store, options Options) *VideoService {
 		uploadRequestTTL: ttl,
 		presignedTTL:     presignedTTL,
 		uploadSigner:     options.UploadSigner,
+		objectVerifier:   options.ObjectVerifier,
 		metrics:          options.Metrics,
 		logger:           logger,
 		now:              now,
@@ -309,9 +314,27 @@ func (s *VideoService) ConfirmUploaded(ctx context.Context, input ConfirmUploade
 		return domain.Video{}, domain.Conflict(domain.CodeInvalidVideoState, "Video cannot transition to uploaded.")
 	}
 
+	verifiedMetadata, err := s.verifyUploadedObject(ctx, upload)
+	if err != nil {
+		s.recordUploadConfirmation("object_verification_error")
+		return domain.Video{}, err
+	}
 	if input.SizeBytes > 0 {
+		if verifiedMetadata.SizeBytes > 0 && input.SizeBytes != verifiedMetadata.SizeBytes {
+			s.recordObjectVerification("metadata_mismatch")
+			s.recordUploadConfirmation("metadata_mismatch")
+			return domain.Video{}, domain.Conflict(domain.CodeUploadObjectMismatch, "Uploaded object size does not match the confirmation request.")
+		}
 		video.SizeBytes = input.SizeBytes
 		upload.SizeBytes = input.SizeBytes
+	} else if verifiedMetadata.SizeBytes > 0 {
+		video.SizeBytes = verifiedMetadata.SizeBytes
+		upload.SizeBytes = verifiedMetadata.SizeBytes
+	}
+	if verifiedMetadata.ContentType != "" && !sameContentType(upload.ContentType, verifiedMetadata.ContentType) {
+		s.recordObjectVerification("metadata_mismatch")
+		s.recordUploadConfirmation("metadata_mismatch")
+		return domain.Video{}, domain.Conflict(domain.CodeUploadObjectMismatch, "Uploaded object content type does not match the upload request.")
 	}
 	if strings.TrimSpace(input.ChecksumSHA256) != "" {
 		upload.ChecksumSHA256 = strings.TrimSpace(input.ChecksumSHA256)
@@ -348,6 +371,7 @@ func (s *VideoService) ConfirmUploaded(ctx context.Context, input ConfirmUploade
 	}
 	s.recordDBOperation("complete_upload", startedAt, nil)
 	s.recordUploadConfirmation("confirmed")
+	s.recordStatusTransition(previousStatus, video.Status, "updated")
 	s.logger.Info(
 		"upload confirmed",
 		"video_id", video.ID,
@@ -417,9 +441,11 @@ func (s *VideoService) UpdateStatus(ctx context.Context, input UpdateStatusInput
 		return domain.Video{}, domain.ValidationError("status is invalid.")
 	}
 	if !input.Actor.canUpdateVideoStatus(video.OwnerID, status) {
+		s.recordStatusTransition(video.Status, status, "forbidden")
 		return domain.Video{}, actorError(input.Actor, "User cannot update this video status.")
 	}
 	if !domain.CanTransitionVideo(video.Status, status) {
+		s.recordStatusTransition(video.Status, status, "conflict")
 		return domain.Video{}, domain.Conflict(domain.CodeInvalidVideoState, "Video state transition is invalid.")
 	}
 	now := s.now().UTC()
@@ -453,9 +479,11 @@ func (s *VideoService) UpdateStatus(ctx context.Context, input UpdateStatusInput
 	startedAt := time.Now()
 	if err := s.store.SaveVideoStatus(ctx, video, history); err != nil {
 		s.recordDBOperation("save_video_status", startedAt, err)
+		s.recordStatusTransition(previousStatus, status, "db_error")
 		return domain.Video{}, err
 	}
 	s.recordDBOperation("save_video_status", startedAt, nil)
+	s.recordStatusTransition(previousStatus, status, "updated")
 	s.logger.Info(
 		"video status updated",
 		"video_id", video.ID,
@@ -465,6 +493,38 @@ func (s *VideoService) UpdateStatus(ctx context.Context, input UpdateStatusInput
 		"correlation_id", input.CorrelationID,
 	)
 	return video, nil
+}
+
+func (s *VideoService) verifyUploadedObject(ctx context.Context, upload domain.UploadRequest) (storage.ObjectMetadata, error) {
+	if s.objectVerifier == nil {
+		return storage.ObjectMetadata{}, nil
+	}
+	metadata, err := s.objectVerifier.VerifyObject(ctx, storage.VerifyObjectInput{
+		Bucket:    upload.Bucket,
+		ObjectKey: upload.ObjectKey,
+		Now:       s.now().UTC(),
+	})
+	if err != nil {
+		s.recordObjectVerification("error")
+		s.logger.Error(
+			"upload object verification failed",
+			"video_id", upload.VideoID,
+			"upload_request_id", upload.ID,
+			"owner_id", upload.OwnerID,
+			"error", err,
+		)
+		return storage.ObjectMetadata{}, err
+	}
+	s.recordObjectVerification("verified")
+	s.logger.Info(
+		"upload object verified",
+		"video_id", upload.VideoID,
+		"upload_request_id", upload.ID,
+		"owner_id", upload.OwnerID,
+		"size_bytes", metadata.SizeBytes,
+		"content_type", metadata.ContentType,
+	)
+	return metadata, nil
 }
 
 func (s *VideoService) Ready(ctx context.Context) error {
@@ -510,6 +570,12 @@ func rawObjectKey(videoID string, contentType string) string {
 func validVideoContentType(contentType string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
 	return strings.HasPrefix(contentType, "video/")
+}
+
+func sameContentType(left string, right string) bool {
+	left = strings.ToLower(strings.TrimSpace(strings.Split(left, ";")[0]))
+	right = strings.ToLower(strings.TrimSpace(strings.Split(right, ";")[0]))
+	return left == right
 }
 
 func defaultEnvironment(environment string) string {
@@ -583,6 +649,18 @@ func (s *VideoService) recordUploadConfirmation(outcome string) {
 func (s *VideoService) recordPresign(outcome string) {
 	if s.metrics != nil {
 		s.metrics.RecordPresign(outcome)
+	}
+}
+
+func (s *VideoService) recordObjectVerification(outcome string) {
+	if s.metrics != nil {
+		s.metrics.RecordObjectVerification(outcome)
+	}
+}
+
+func (s *VideoService) recordStatusTransition(from string, to string, outcome string) {
+	if s.metrics != nil {
+		s.metrics.RecordStatusTransition(from, to, outcome)
 	}
 }
 

@@ -14,7 +14,7 @@ As of 2026-07-01:
 
 - `identity-service`: da co auth/profile/JWT/OAuth/JWKS/PostgreSQL/Redis-facing design o muc tot hon cac service khac.
 - `api-gateway`: da co routing, request/correlation ID, JWT verify qua JWKS, trusted user-context forwarding, readiness va basic metrics.
-- `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow, upload idempotency, MinIO/S3 presigned upload URL, owner/internal authorization va Redpanda/Kafka outbox publisher cho `video.uploaded.v1`.
+- `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow, upload idempotency, MinIO/S3 presigned upload URL, optional object metadata verification, owner/internal authorization va Redpanda/Kafka outbox publisher cho `video.uploaded.v1`.
 - `media-worker`, `feed-social-service`, `live-service`: van chu yeu la skeleton.
 - `aiops-service`: da co package layout, chua co RCA pipeline that.
 
@@ -212,8 +212,8 @@ Done criteria:
 
 1. Start `media-worker` processing job model and state machine.
 2. Define the worker-to-`video-service` status update contract and tests.
-3. Add MinIO object metadata verification during upload confirmation if needed for stronger evidence.
-4. Add GitOps/Kubernetes manifests and smoke tests for the video upload-to-event flow.
+3. Add GitOps/Kubernetes manifests and smoke tests for the video upload-to-event flow.
+4. Continue with `media-worker` event consumption and processing job persistence.
 5. Keep gateway rate limiting as a hardening task after video flow has durable storage.
 
 ## Update Rule

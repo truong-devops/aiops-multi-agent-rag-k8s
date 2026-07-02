@@ -39,9 +39,9 @@ func main() {
 	defer closeStore()
 
 	metrics := observability.NewMetrics()
-	uploadSigner, err := newUploadSigner(cfg)
+	uploadSigner, objectVerifier, err := newStorageClients(cfg)
 	if err != nil {
-		logger.Error("failed to initialize upload signer", "service", serviceName, "error", err)
+		logger.Error("failed to initialize object storage client", "service", serviceName, "error", err)
 		os.Exit(1)
 	}
 	videoService := service.NewVideoService(store, service.Options{
@@ -51,6 +51,7 @@ func main() {
 		UploadRequestTTL: cfg.UploadRequestTTL,
 		PresignedTTL:     cfg.PresignedUploadTTL,
 		UploadSigner:     uploadSigner,
+		ObjectVerifier:   objectVerifier,
 		Metrics:          metrics,
 		Logger:           logger,
 	})
@@ -118,17 +119,24 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger) (rep
 	return repository.NewMemoryStore(), func() {}, nil
 }
 
-func newUploadSigner(cfg config.Config) (storage.UploadSigner, error) {
+func newStorageClients(cfg config.Config) (storage.UploadSigner, storage.ObjectVerifier, error) {
 	if !cfg.UseMinIOPresigner() {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return storage.NewS3Presigner(storage.S3PresignerConfig{
+	client, err := storage.NewS3Presigner(storage.S3PresignerConfig{
 		Endpoint:  cfg.MinIOEndpoint,
 		AccessKey: cfg.MinIOAccessKey,
 		SecretKey: cfg.MinIOSecretKey,
 		Region:    cfg.MinIORegion,
 		UseSSL:    cfg.MinIOUseSSL,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if cfg.VerifyUploadObject {
+		return client, client, nil
+	}
+	return client, nil, nil
 }
 
 func startOutboxPublisher(ctx context.Context, cfg config.Config, store repository.Store, metrics *observability.Metrics, logger *slog.Logger) func() {

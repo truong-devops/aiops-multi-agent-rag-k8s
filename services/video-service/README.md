@@ -48,6 +48,7 @@ Public paths should be reached through `api-gateway` as `/api/v1/...`.
 | `MINIO_SECRET_KEY` | empty | MinIO/S3 secret key. Required when `MINIO_ENDPOINT` is set. |
 | `MINIO_REGION` | `us-east-1` | S3 signing region. |
 | `MINIO_USE_SSL` | `false` | Use HTTPS for presigned URLs. |
+| `VERIFY_UPLOAD_OBJECT` | `false` | When true, confirm upload verifies raw object metadata through S3-compatible HEAD before marking video uploaded. Requires `MINIO_ENDPOINT`. |
 | `KAFKA_BROKERS` | empty | Comma-separated Redpanda/Kafka broker list. Required when outbox publisher is enabled. |
 | `VIDEO_EVENTS_TOPIC` | `video.events` | Kafka topic for video lifecycle events. |
 | `OUTBOX_PUBLISHER_ENABLED` | `false` | Enables the outbox publisher worker. |
@@ -66,14 +67,14 @@ Implemented integration foundation:
 
 - Upload request creation supports `Idempotency-Key` per owner so retried client requests reuse the same upload intent.
 - When MinIO config is present, upload request creation returns a real S3-compatible SigV4 presigned PUT URL.
+- When `VERIFY_UPLOAD_OBJECT=true`, confirm upload checks the raw object exists and verifies size/content type metadata before marking the video uploaded.
 - Confirm upload writes `video.uploaded.v1` into `outbox_events` in the same repository operation as upload/video status updates.
 - When `OUTBOX_PUBLISHER_ENABLED=true`, the outbox worker publishes envelopes to Redpanda/Kafka and marks events `published` only after broker ack.
 - Owner/admin/internal authorization is enforced for read, confirm and status update paths. Worker-driven status updates should use `X-Internal-Token`.
-- `/metrics` includes HTTP, upload, presign, outbox publish and DB operation counters.
+- `/metrics` includes HTTP, upload, presign, object verification, status transition, outbox publish and DB operation counters.
 
 Production integration work still needs:
 
-- Optional object metadata verification on upload confirmation.
 - Richer retry backoff controls for outbox failures.
 - Redis cache for short-lived upload intent/object metadata if the flow needs it later.
 
@@ -100,11 +101,10 @@ created -> uploaded
 
 The service records `video.uploaded.v1` as a pending outbox event after upload metadata is committed. The event contract is defined in `packages/contracts/event-contracts.md`.
 
-The current implementation records request ID, correlation ID, producer, environment and payload fields so the future outbox publisher has the right evidence.
+The current implementation records request ID, correlation ID, producer, environment and payload fields so the outbox publisher emits traceable event envelopes.
 
 ## Trách Nhiệm Chưa Làm
 
-- Verify object metadata from MinIO during confirm upload.
 - Add Kubernetes/GitOps manifests for DB, MinIO, Redpanda and service secrets.
 - Add smoke test script for the end-to-end upload request flow.
 

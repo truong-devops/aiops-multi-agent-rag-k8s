@@ -16,7 +16,9 @@ type Metrics struct {
 	uploadRequests      map[string]uint64
 	uploadConfirmations map[string]uint64
 	presignOperations   map[string]uint64
+	objectVerifications map[string]uint64
 	outboxOperations    map[string]uint64
+	statusTransitions   map[transitionMetricKey]uint64
 	dbOperations        map[operationMetricKey]uint64
 	dbLatency           map[operationMetricKey]time.Duration
 }
@@ -31,6 +33,12 @@ type operationMetricKey struct {
 	Outcome   string
 }
 
+type transitionMetricKey struct {
+	From    string
+	To      string
+	Outcome string
+}
+
 func NewMetrics() *Metrics {
 	return &Metrics{
 		requests:            map[metricKey]uint64{},
@@ -38,7 +46,9 @@ func NewMetrics() *Metrics {
 		uploadRequests:      map[string]uint64{},
 		uploadConfirmations: map[string]uint64{},
 		presignOperations:   map[string]uint64{},
+		objectVerifications: map[string]uint64{},
 		outboxOperations:    map[string]uint64{},
+		statusTransitions:   map[transitionMetricKey]uint64{},
 		dbOperations:        map[operationMetricKey]uint64{},
 		dbLatency:           map[operationMetricKey]time.Duration{},
 	}
@@ -73,8 +83,23 @@ func (m *Metrics) RecordPresign(outcome string) {
 	m.recordNamed(m.presignOperations, normalizeOutcome(outcome))
 }
 
+func (m *Metrics) RecordObjectVerification(outcome string) {
+	m.recordNamed(m.objectVerifications, normalizeOutcome(outcome))
+}
+
 func (m *Metrics) RecordOutboxPublish(outcome string) {
 	m.recordNamed(m.outboxOperations, normalizeOutcome(outcome))
+}
+
+func (m *Metrics) RecordStatusTransition(from string, to string, outcome string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := transitionMetricKey{
+		From:    normalizeLabel(from, "unknown"),
+		To:      normalizeLabel(to, "unknown"),
+		Outcome: normalizeOutcome(outcome),
+	}
+	m.statusTransitions[key]++
 }
 
 func (m *Metrics) RecordDBOperation(operation string, outcome string, duration time.Duration) {
@@ -119,7 +144,25 @@ func (m *Metrics) writePrometheus(w http.ResponseWriter) {
 	uploadRequests := copyStringCounters(m.uploadRequests)
 	uploadConfirmations := copyStringCounters(m.uploadConfirmations)
 	presignOperations := copyStringCounters(m.presignOperations)
+	objectVerifications := copyStringCounters(m.objectVerifications)
 	outboxOperations := copyStringCounters(m.outboxOperations)
+	transitionKeys := make([]transitionMetricKey, 0, len(m.statusTransitions))
+	for key := range m.statusTransitions {
+		transitionKeys = append(transitionKeys, key)
+	}
+	sort.Slice(transitionKeys, func(i, j int) bool {
+		if transitionKeys[i].From == transitionKeys[j].From {
+			if transitionKeys[i].To == transitionKeys[j].To {
+				return transitionKeys[i].Outcome < transitionKeys[j].Outcome
+			}
+			return transitionKeys[i].To < transitionKeys[j].To
+		}
+		return transitionKeys[i].From < transitionKeys[j].From
+	})
+	statusTransitions := make(map[transitionMetricKey]uint64, len(m.statusTransitions))
+	for _, key := range transitionKeys {
+		statusTransitions[key] = m.statusTransitions[key]
+	}
 	dbKeys := make([]operationMetricKey, 0, len(m.dbOperations))
 	for key := range m.dbOperations {
 		dbKeys = append(dbKeys, key)
@@ -153,7 +196,14 @@ func (m *Metrics) writePrometheus(w http.ResponseWriter) {
 	writeOutcomeCounter(w, "video_service_upload_requests_total", "Upload request creation attempts by outcome.", uploadRequests)
 	writeOutcomeCounter(w, "video_service_upload_confirmations_total", "Upload confirmation attempts by outcome.", uploadConfirmations)
 	writeOutcomeCounter(w, "video_service_presign_operations_total", "Presigned upload URL generation attempts by outcome.", presignOperations)
+	writeOutcomeCounter(w, "video_service_object_verifications_total", "Uploaded object metadata verification attempts by outcome.", objectVerifications)
 	writeOutcomeCounter(w, "video_service_outbox_publish_total", "Outbox publish attempts by outcome.", outboxOperations)
+
+	_, _ = fmt.Fprintln(w, "# HELP video_service_status_transitions_total Video status transitions by source status, target status and outcome.")
+	_, _ = fmt.Fprintln(w, "# TYPE video_service_status_transitions_total counter")
+	for _, key := range transitionKeys {
+		_, _ = fmt.Fprintf(w, "video_service_status_transitions_total{from=%q,to=%q,outcome=%q} %d\n", key.From, key.To, key.Outcome, statusTransitions[key])
+	}
 
 	_, _ = fmt.Fprintln(w, "# HELP video_service_db_operations_total Database operations by operation and outcome.")
 	_, _ = fmt.Fprintln(w, "# TYPE video_service_db_operations_total counter")

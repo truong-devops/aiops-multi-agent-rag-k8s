@@ -127,7 +127,73 @@ func TestListVideos(t *testing.T) {
 	}
 }
 
+func TestInternalStatusUpdateFlow(t *testing.T) {
+	app := newTestAppWithInternalToken("internal-secret")
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/videos/upload-requests", bytes.NewBufferString(`{
+		"title": "Worker video",
+		"content_type": "video/mp4"
+	}`))
+	createReq.Header.Set("X-User-ID", "usr_123")
+	createRec := httptest.NewRecorder()
+	app.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+	var created struct {
+		Data struct {
+			Video struct {
+				ID string `json:"id"`
+			} `json:"video"`
+			UploadRequest struct {
+				ID string `json:"id"`
+			} `json:"upload_request"`
+		} `json:"data"`
+	}
+	decodeJSONResponse(t, createRec.Body.Bytes(), &created)
+
+	confirmReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/videos/"+created.Data.Video.ID+"/uploaded",
+		bytes.NewBufferString(`{"upload_request_id":"`+created.Data.UploadRequest.ID+`"}`),
+	)
+	confirmReq.Header.Set("X-User-ID", "usr_123")
+	confirmRec := httptest.NewRecorder()
+	app.ServeHTTP(confirmRec, confirmReq)
+	if confirmRec.Code != http.StatusOK {
+		t.Fatalf("confirm status = %d, body = %s", confirmRec.Code, confirmRec.Body.String())
+	}
+
+	processingReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/v1/videos/"+created.Data.Video.ID+"/status",
+		bytes.NewBufferString(`{"status":"processing","reason":"worker_started"}`),
+	)
+	processingReq.Header.Set("X-Internal-Token", "internal-secret")
+	processingRec := httptest.NewRecorder()
+	app.ServeHTTP(processingRec, processingReq)
+	if processingRec.Code != http.StatusOK {
+		t.Fatalf("processing status = %d, body = %s", processingRec.Code, processingRec.Body.String())
+	}
+
+	readyReq := httptest.NewRequest(
+		http.MethodPatch,
+		"/v1/videos/"+created.Data.Video.ID+"/status",
+		bytes.NewBufferString(`{"status":"ready","reason":"worker_completed"}`),
+	)
+	readyReq.Header.Set("X-Internal-Token", "internal-secret")
+	readyRec := httptest.NewRecorder()
+	app.ServeHTTP(readyRec, readyReq)
+	if readyRec.Code != http.StatusOK {
+		t.Fatalf("ready status = %d, body = %s", readyRec.Code, readyRec.Body.String())
+	}
+}
+
 func newTestApp() http.Handler {
+	return newTestAppWithInternalToken("")
+}
+
+func newTestAppWithInternalToken(internalToken string) http.Handler {
 	store := repository.NewMemoryStore()
 	videoService := service.NewVideoService(store, service.Options{
 		RawVideoBucket:   "raw-videos",
@@ -136,7 +202,7 @@ func newTestApp() http.Handler {
 	})
 	metrics := observability.NewMetrics()
 	mux := http.NewServeMux()
-	New(videoService).RegisterRoutes(mux, metrics.Handler())
+	New(videoService, Options{InternalAPIToken: internalToken}).RegisterRoutes(mux, metrics.Handler())
 
 	var app http.Handler = mux
 	app = metrics.Middleware(app)

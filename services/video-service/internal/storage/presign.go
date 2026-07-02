@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +20,10 @@ type UploadSigner interface {
 	PresignPutObject(ctx context.Context, input PresignPutObjectInput) (string, error)
 }
 
+type ObjectVerifier interface {
+	VerifyObject(ctx context.Context, input VerifyObjectInput) (ObjectMetadata, error)
+}
+
 type PresignPutObjectInput struct {
 	Bucket      string
 	ObjectKey   string
@@ -26,12 +32,25 @@ type PresignPutObjectInput struct {
 	Now         time.Time
 }
 
+type VerifyObjectInput struct {
+	Bucket    string
+	ObjectKey string
+	Now       time.Time
+}
+
+type ObjectMetadata struct {
+	SizeBytes   int64
+	ContentType string
+	ETag        string
+}
+
 type S3Presigner struct {
-	endpoint  string
-	accessKey string
-	secretKey string
-	region    string
-	useSSL    bool
+	endpoint   string
+	accessKey  string
+	secretKey  string
+	region     string
+	useSSL     bool
+	httpClient *http.Client
 }
 
 type S3PresignerConfig struct {
@@ -63,6 +82,9 @@ func NewS3Presigner(config S3PresignerConfig) (*S3Presigner, error) {
 		secretKey: strings.TrimSpace(config.SecretKey),
 		region:    region,
 		useSSL:    config.UseSSL,
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}, nil
 }
 
@@ -82,13 +104,7 @@ func (s *S3Presigner) PresignPutObject(_ context.Context, input PresignPutObject
 		now = time.Now().UTC()
 	}
 
-	scheme := "http"
-	if s.useSSL {
-		scheme = "https"
-	}
-	host := s.endpoint
-	host = strings.TrimPrefix(strings.TrimPrefix(host, "https://"), "http://")
-	objectPath := "/" + pathEscape(strings.Trim(input.Bucket, "/")) + "/" + pathEscape(strings.TrimLeft(input.ObjectKey, "/"))
+	scheme, host, objectPath := s.objectURLParts(input.Bucket, input.ObjectKey)
 	amzDate := now.Format("20060102T150405Z")
 	dateStamp := now.Format("20060102")
 	credentialScope := dateStamp + "/" + s.region + "/s3/aws4_request"
@@ -128,6 +144,94 @@ func (s *S3Presigner) PresignPutObject(_ context.Context, input PresignPutObject
 	}).String(), nil
 }
 
+func (s *S3Presigner) VerifyObject(ctx context.Context, input VerifyObjectInput) (ObjectMetadata, error) {
+	if strings.TrimSpace(input.Bucket) == "" || strings.TrimSpace(input.ObjectKey) == "" {
+		return ObjectMetadata{}, domain.ValidationError("bucket and object key are required for object verification.")
+	}
+	now := input.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	scheme, host, objectPath := s.objectURLParts(input.Bucket, input.ObjectKey)
+	target := (&url.URL{Scheme: scheme, Host: host, Path: objectPath}).String()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
+	if err != nil {
+		return ObjectMetadata{}, fmt.Errorf("build object metadata request: %w", err)
+	}
+	req.Host = host
+	req.Header.Set("X-Amz-Date", now.Format("20060102T150405Z"))
+	req.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+	req.Header.Set("Authorization", s.authorizationHeader(http.MethodHead, objectPath, now, map[string]string{
+		"host":                 host,
+		"x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+		"x-amz-date":           req.Header.Get("X-Amz-Date"),
+	}))
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return ObjectMetadata{}, domain.NewError(http.StatusServiceUnavailable, domain.CodeObjectStorageError, "Object storage is unavailable.")
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		sizeBytes := resp.ContentLength
+		if sizeBytes < 0 {
+			sizeBytes = parseContentLength(resp.Header.Get("Content-Length"))
+		}
+		return ObjectMetadata{
+			SizeBytes:   sizeBytes,
+			ContentType: strings.TrimSpace(resp.Header.Get("Content-Type")),
+			ETag:        strings.Trim(resp.Header.Get("ETag"), `"`),
+		}, nil
+	case http.StatusNotFound:
+		return ObjectMetadata{}, domain.NotFound(domain.CodeUploadObjectNotFound, "Uploaded object was not found.")
+	case http.StatusForbidden, http.StatusUnauthorized:
+		return ObjectMetadata{}, domain.NewError(http.StatusBadGateway, domain.CodeObjectStorageError, "Object storage denied metadata verification.")
+	default:
+		if resp.StatusCode >= 500 {
+			return ObjectMetadata{}, domain.NewError(http.StatusServiceUnavailable, domain.CodeObjectStorageError, "Object storage metadata verification failed.")
+		}
+		return ObjectMetadata{}, domain.NewError(http.StatusBadGateway, domain.CodeObjectStorageError, "Object storage metadata verification failed.")
+	}
+}
+
+func (s *S3Presigner) objectURLParts(bucket string, objectKey string) (string, string, string) {
+	scheme := "http"
+	if s.useSSL {
+		scheme = "https"
+	}
+	host := strings.TrimPrefix(strings.TrimPrefix(s.endpoint, "https://"), "http://")
+	objectPath := "/" + pathEscape(strings.Trim(bucket, "/")) + "/" + pathEscape(strings.TrimLeft(objectKey, "/"))
+	return scheme, host, objectPath
+}
+
+func (s *S3Presigner) authorizationHeader(method string, objectPath string, now time.Time, headers map[string]string) string {
+	amzDate := now.UTC().Format("20060102T150405Z")
+	dateStamp := now.UTC().Format("20060102")
+	credentialScope := dateStamp + "/" + s.region + "/s3/aws4_request"
+	signedHeaders := sortedHeaderNames(headers)
+	canonicalHeaders := canonicalHeaderString(headers, signedHeaders)
+	canonicalRequest := strings.Join([]string{
+		method,
+		objectPath,
+		"",
+		canonicalHeaders,
+		strings.Join(signedHeaders, ";"),
+		"UNSIGNED-PAYLOAD",
+	}, "\n")
+	stringToSign := strings.Join([]string{
+		"AWS4-HMAC-SHA256",
+		amzDate,
+		credentialScope,
+		sha256Hex([]byte(canonicalRequest)),
+	}, "\n")
+	signature := hmacHex(signingKey(s.secretKey, dateStamp, s.region), []byte(stringToSign))
+	return "AWS4-HMAC-SHA256 Credential=" + s.accessKey + "/" + credentialScope +
+		", SignedHeaders=" + strings.Join(signedHeaders, ";") +
+		", Signature=" + signature
+}
+
 func canonicalQueryString(values url.Values) string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -158,6 +262,38 @@ func queryEscape(value string) string {
 	escaped = strings.ReplaceAll(escaped, "+", "%20")
 	escaped = strings.ReplaceAll(escaped, "%7E", "~")
 	return escaped
+}
+
+func sortedHeaderNames(headers map[string]string) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, strings.ToLower(strings.TrimSpace(name)))
+	}
+	sort.Strings(names)
+	return names
+}
+
+func canonicalHeaderString(headers map[string]string, names []string) string {
+	values := map[string]string{}
+	for name, value := range headers {
+		values[strings.ToLower(strings.TrimSpace(name))] = strings.Join(strings.Fields(value), " ")
+	}
+	var builder strings.Builder
+	for _, name := range names {
+		builder.WriteString(name)
+		builder.WriteString(":")
+		builder.WriteString(values[name])
+		builder.WriteString("\n")
+	}
+	return builder.String()
+}
+
+func parseContentLength(value string) int64 {
+	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return parsed
 }
 
 func signingKey(secret string, dateStamp string, region string) []byte {
