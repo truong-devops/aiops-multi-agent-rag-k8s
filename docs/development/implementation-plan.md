@@ -15,7 +15,7 @@ As of 2026-07-01:
 - `identity-service`: da co auth/profile/JWT/OAuth/JWKS/PostgreSQL/Redis-facing design o muc tot hon cac service khac.
 - `api-gateway`: da co routing, request/correlation ID, JWT verify qua JWKS, trusted user-context forwarding, readiness va basic metrics.
 - `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow, upload idempotency, MinIO/S3 presigned upload URL, optional object metadata verification, owner/internal authorization va Redpanda/Kafka outbox publisher cho `video.uploaded.v1`.
-- `media-worker`: da co production-shaped scaffold va PostgreSQL job persistence; chua consume event/chay processor. `feed-social-service`, `live-service`: van chu yeu la skeleton.
+- `media-worker`: da co production-shaped scaffold, PostgreSQL job persistence, `video.uploaded.v1` consumer, placeholder runner, video-service status update client, retry/backoff va dead-letter; chua co FFmpeg/output upload. `feed-social-service`, `live-service`: van chu yeu la skeleton.
 - `aiops-service`: da co package layout, chua co RCA pipeline that.
 
 ## Milestone 0: Project Rules And Handoff
@@ -84,14 +84,14 @@ Detailed service checklist: `docs/development/media-worker-implementation-plan.m
 
 - `[x]` Define processing job domain and state machine.
 - `[x]` Add PostgreSQL migration for `processing_jobs`, `processing_attempts`, `dead_letters`.
-- `[ ]` Consume `video.uploaded.v1`.
-- `[ ]` Create processing job and first attempt.
-- `[ ]` Add processing placeholder path before real FFmpeg.
-- `[ ]` Add retry and dead-letter behavior.
-- `[ ]` Update video status through `video-service` API or controlled event.
+- `[x]` Consume `video.uploaded.v1`.
+- `[x]` Create processing job and first attempt.
+- `[x]` Add processing placeholder path before real FFmpeg.
+- `[x]` Add retry and dead-letter behavior.
+- `[x]` Update video status through `video-service` API or controlled event.
 - `[ ]` Emit `video.processing_started.v1`, `video.ready.v1`, `video.processing_failed.v1`.
-- `[ ]` Add metrics for job count, success, failure, retry, dead-letter, queue lag.
-- `[ ]` Add incident-friendly logs with `video_id`, `job_id`, `attempt`, `error_code`.
+- `[~]` Add metrics for job count, success, failure, retry, dead-letter, queue lag.
+- `[x]` Add incident-friendly logs with `video_id`, `job_id`, `attempt`, `error_code`.
 
 Done criteria:
 
@@ -212,10 +212,10 @@ Done criteria:
 
 ## Suggested Immediate Next Steps
 
-1. Start `media-worker` processing job model and state machine.
-2. Define the worker-to-`video-service` status update contract and tests.
-3. Add GitOps/Kubernetes manifests and smoke tests for the video upload-to-event flow.
-4. Continue with `media-worker` event consumption and processing job persistence.
+1. Add FFmpeg/FFprobe processing behind the existing `media-worker` processor interface.
+2. Add processed video and thumbnail upload to MinIO.
+3. Decide and implement media lifecycle event publishing contract.
+4. Add GitOps/Kubernetes manifests and smoke tests for the video upload-to-processing flow.
 5. Keep gateway rate limiting as a hardening task after video flow has durable storage.
 
 ## Update Rule

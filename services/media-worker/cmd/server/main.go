@@ -10,11 +10,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/client"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/config"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/event"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/handler"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/observability"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/processor"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/repository"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/service"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/media-worker/internal/storage"
 )
 
 const serviceName = "media-worker"
@@ -36,12 +40,31 @@ func main() {
 	}
 	defer closeStore()
 
-	processingService := service.NewProcessingService(store, service.Options{
-		RawBucket:   cfg.RawVideoBucket,
-		MaxAttempts: cfg.MaxAttempts,
-		Logger:      logger,
-	})
 	metrics := observability.NewMetrics()
+	objectStore, err := newObjectStore(cfg)
+	if err != nil {
+		logger.Error("failed to initialize object store", "service", serviceName, "error", err)
+		os.Exit(1)
+	}
+	statusClient, err := newStatusClient(cfg)
+	if err != nil {
+		logger.Error("failed to initialize video status client", "service", serviceName, "error", err)
+		os.Exit(1)
+	}
+	placeholder := processor.NewPlaceholderProcessor(processor.PlaceholderConfig{
+		ObjectStore: objectStore,
+	})
+	processingService := service.NewProcessingService(store, service.Options{
+		RawBucket:    cfg.RawVideoBucket,
+		MaxAttempts:  cfg.MaxAttempts,
+		WorkerID:     cfg.WorkerID,
+		LeaseTTL:     cfg.JobLeaseTTL,
+		BatchSize:    cfg.JobBatchSize,
+		Processor:    placeholder,
+		StatusClient: statusClient,
+		Metrics:      metrics,
+		Logger:       logger,
+	})
 
 	mux := http.NewServeMux()
 	handler.New(processingService).RegisterRoutes(mux, metrics.Handler())
@@ -61,6 +84,16 @@ func main() {
 		MaxHeaderBytes:    1 << 20,
 	}
 
+	rootCtx, cancelRoot := context.WithCancel(context.Background())
+	defer cancelRoot()
+	closeConsumer := startUploadedConsumer(rootCtx, cfg, processingService, metrics, logger)
+	defer closeConsumer()
+	if cfg.RunnerEnabled {
+		go processingService.Run(rootCtx, cfg.JobPollInterval)
+	} else {
+		logger.Info("processing runner disabled", "service", serviceName)
+	}
+
 	go func() {
 		logger.Info("starting service", "service", serviceName, "port", cfg.Port, "environment", cfg.Environment)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -72,6 +105,7 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
+	cancelRoot()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -98,4 +132,52 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger) (rep
 
 	logger.Warn("using in-memory processing store; this is only suitable for local development", "service", serviceName, "environment", cfg.Environment)
 	return repository.NewMemoryStore(), func() {}, nil
+}
+
+func newObjectStore(cfg config.Config) (storage.ObjectStore, error) {
+	if cfg.MinIOEndpoint == "" {
+		return storage.NoopObjectStore{}, nil
+	}
+	return storage.NewS3ObjectStore(storage.S3ObjectStoreConfig{
+		Endpoint:  cfg.MinIOEndpoint,
+		AccessKey: cfg.MinIOAccessKey,
+		SecretKey: cfg.MinIOSecretKey,
+		Region:    cfg.MinIORegion,
+		UseSSL:    cfg.MinIOUseSSL,
+	})
+}
+
+func newStatusClient(cfg config.Config) (client.VideoStatusClient, error) {
+	if cfg.VideoServiceBaseURL == "" {
+		return nil, nil
+	}
+	return client.NewHTTPVideoStatusClient(client.HTTPVideoStatusClientConfig{
+		BaseURL:       cfg.VideoServiceBaseURL,
+		InternalToken: cfg.InternalAPIToken,
+		Timeout:       5 * time.Second,
+	})
+}
+
+func startUploadedConsumer(ctx context.Context, cfg config.Config, processingService *service.ProcessingService, metrics *observability.Metrics, logger *slog.Logger) func() {
+	if !cfg.ConsumerEnabled {
+		logger.Info("uploaded event consumer disabled", "service", serviceName)
+		return func() {}
+	}
+	consumer := event.NewKafkaConsumer(event.KafkaConsumerConfig{
+		Brokers: cfg.KafkaBrokers,
+		Topic:   cfg.VideoEventsTopic,
+		GroupID: cfg.ConsumerGroup,
+	})
+	worker := event.NewUploadedConsumerWorker(event.UploadedConsumerConfig{
+		Consumer: consumer,
+		Service:  processingService,
+		Logger:   logger,
+		Metrics:  metrics,
+	})
+	go worker.Run(ctx)
+	return func() {
+		if err := worker.Close(); err != nil {
+			logger.Error("failed to close uploaded event consumer", "service", serviceName, "error", err)
+		}
+	}
 }

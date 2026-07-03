@@ -37,8 +37,8 @@ Public clients should not call `media-worker` directly.
 | `VIDEO_EVENTS_TOPIC` | `video.events` | Topic containing `video.uploaded.v1`. |
 | `MEDIA_EVENTS_TOPIC` | `media.events` | Future media lifecycle event topic. |
 | `CONSUMER_GROUP` | `media-worker` | Kafka consumer group. |
-| `CONSUMER_ENABLED` | `false` | Enables the future `video.uploaded.v1` consumer. |
-| `RUNNER_ENABLED` | `false` | Enables the future job runner loop. |
+| `CONSUMER_ENABLED` | `false` | Enables the `video.uploaded.v1` consumer. |
+| `RUNNER_ENABLED` | `false` | Enables the job runner loop. |
 | `WORKER_ID` | hostname | Worker identity used for job leases and attempt records. |
 | `MAX_ATTEMPTS` | `3` | Max processing attempts before final failure/dead-letter. |
 | `JOB_LEASE_TTL` | `2m` | Job claim lease duration. |
@@ -74,16 +74,18 @@ Implemented now:
   - runnable job claim/lease,
   - attempt start/success/failure,
   - dead-letter persistence.
+- Kafka consumer for `video.uploaded.v1` with envelope parsing, validation, durable job creation and commit-after-persist behavior.
+- Placeholder runner that claims jobs, verifies the raw object through S3-compatible HEAD, updates `video-service` status to `processing`, then marks the job `succeeded`, `retrying`, or `dead_letter`.
+- HTTP client for video-service internal status updates through `X-Internal-Token`.
+- Retry/backoff policy and stable processing error codes.
 - Unit tests and skipped-by-default PostgreSQL integration harness.
 
 Still pending:
 
-- Kafka consumer for `video.uploaded.v1`.
-- Placeholder/FFmpeg runner.
-- MinIO read/write integration.
-- Calls to video-service status API.
-- Retry policy/backoff implementation around actual processing errors.
+- Real FFmpeg/FFprobe processing.
+- Processed video and thumbnail upload to MinIO.
 - Outgoing media lifecycle events.
+- Redis locks/idempotency cache, if needed after PostgreSQL behavior is stable.
 
 ## Dependencies Dự Kiến
 

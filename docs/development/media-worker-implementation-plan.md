@@ -21,7 +21,7 @@ Service nay phuc vu hai muc tieu:
 
 ## Current Snapshot
 
-As of 2026-07-02:
+As of 2026-07-03:
 
 - `[x]` Da co Go module skeleton.
 - `[x]` Da co `cmd/server/main.go` voi `/healthz`, `/readyz`, `/metrics` placeholder.
@@ -29,12 +29,12 @@ As of 2026-07-02:
 - `[x]` Da co config loader/validation rieng.
 - `[x]` Da co domain model cho processing job/attempt/dead-letter.
 - `[x]` Da co PostgreSQL persistence cho job, attempt, inbox va dead-letter.
-- `[ ]` Chua consume `video.uploaded.v1`.
-- `[ ]` Chua co worker loop, retry, dead-letter.
-- `[ ]` Chua update video status qua `video-service`.
-- `[ ]` Chua co MinIO input/output client.
-- `[ ]` Chua co FFmpeg/processing placeholder.
-- `[ ]` Chua co metrics/logs that cho worker behavior.
+- `[x]` Da consume `video.uploaded.v1` khi `CONSUMER_ENABLED=true`.
+- `[x]` Da co worker loop, retry/backoff va dead-letter.
+- `[x]` Da update video status qua `video-service` khi `RUNNER_ENABLED=true`.
+- `[~]` Da co MinIO raw object metadata check; chua co output upload cho processed/thumbnail.
+- `[x]` Da co processing placeholder.
+- `[~]` Da co metrics/logs cho consumer, runner, retry/dead-letter; chua co FFmpeg-specific metrics.
 
 ## Boundary
 
@@ -80,7 +80,7 @@ Recommended first deploy shape:
 
 Incoming event:
 
-- `[ ]` `video.uploaded.v1`
+- `[x]` `video.uploaded.v1`
 
 Expected envelope:
 
@@ -261,14 +261,14 @@ Done criteria:
 
 ## Phase 3: Kafka Consumer For `video.uploaded.v1`
 
-- `[ ]` Add Kafka consumer using pinned dependency.
-- `[ ]` Parse and validate event envelope.
-- `[ ]` Validate payload fields.
-- `[ ]` Insert inbox/idempotency record by `event_id`.
-- `[ ]` Create queued processing job with request/correlation evidence.
-- `[ ]` Commit Kafka offset only after durable job creation.
-- `[ ]` Add metrics for consumed, duplicate, invalid, failed.
-- `[ ]` Add tests with fake consumer/event handler.
+- `[x]` Add Kafka consumer using pinned dependency.
+- `[x]` Parse and validate event envelope.
+- `[x]` Validate payload fields.
+- `[x]` Insert inbox/idempotency record by `event_id`.
+- `[x]` Create queued processing job with request/correlation evidence.
+- `[x]` Commit Kafka offset only after durable job creation.
+- `[x]` Add metrics for consumed, duplicate, invalid, failed.
+- `[x]` Add tests with fake consumer/event handler.
 
 Done criteria:
 
@@ -278,15 +278,15 @@ Done criteria:
 
 ## Phase 4: Processing Runner
 
-- `[ ]` Add runner loop to claim queued/retrying jobs.
-- `[ ]` Add `processing` status update call to `video-service` before work starts.
-- `[ ]` Add processing placeholder mode that simulates success/failure deterministically for tests.
-- `[ ]` Add MinIO raw object metadata/read path.
-- `[ ]` Add output object key planning for processed video and thumbnail.
-- `[ ]` Add status update call to `video-service` for `ready` on success.
-- `[ ]` Add status update call to `video-service` for `failed` on final failure.
-- `[ ]` Add attempt records with start/end time, exit code, metrics and sanitized error excerpt.
-- `[ ]` Add tests for success path and failure path.
+- `[x]` Add runner loop to claim queued/retrying jobs.
+- `[x]` Add `processing` status update call to `video-service` before work starts.
+- `[x]` Add processing placeholder mode that simulates success/failure deterministically for tests.
+- `[~]` Add MinIO raw object metadata/read path.
+- `[x]` Add output object key planning for processed video and thumbnail.
+- `[x]` Add status update call to `video-service` for `ready` on success.
+- `[x]` Add status update call to `video-service` for `failed` on final failure.
+- `[x]` Add attempt records with start/end time, exit code, metrics and sanitized error excerpt.
+- `[x]` Add tests for success path and failure path.
 
 Done criteria:
 
@@ -296,13 +296,13 @@ Done criteria:
 
 ## Phase 5: Retry, Backoff And Dead Letter
 
-- `[ ]` Define stable error codes: `RAW_OBJECT_NOT_FOUND`, `MINIO_UNAVAILABLE`, `PROCESS_TIMEOUT`, `FFMPEG_FAILED`, `VIDEO_SERVICE_UNAVAILABLE`, `UNKNOWN_PROCESSING_ERROR`.
-- `[ ]` Add retry policy by error type.
-- `[ ]` Add exponential or bounded backoff in `next_run_at`.
-- `[ ]` Move exhausted jobs to `dead_letter`.
-- `[ ]` Store sanitized payload/context in `dead_letters`.
-- `[ ]` Add metrics for retry scheduled, final failure and dead-letter.
-- `[ ]` Add tests for retryable and non-retryable failures.
+- `[x]` Define stable error codes: `RAW_OBJECT_NOT_FOUND`, `MINIO_UNAVAILABLE`, `PROCESS_TIMEOUT`, `FFMPEG_FAILED`, `VIDEO_SERVICE_UNAVAILABLE`, `UNKNOWN_PROCESSING_ERROR`.
+- `[x]` Add retry policy by error type.
+- `[x]` Add exponential or bounded backoff in `next_run_at`.
+- `[x]` Move exhausted jobs to `dead_letter`.
+- `[x]` Store sanitized payload/context in `dead_letters`.
+- `[x]` Add metrics for retry scheduled, final failure and dead-letter.
+- `[x]` Add tests for retryable and non-retryable failures.
 
 Done criteria:
 
@@ -379,16 +379,16 @@ Done criteria:
 
 Next best engineering task:
 
-1. Implement Phase 3 Kafka consume path for `video.uploaded.v1`.
-2. Implement event envelope parsing and durable inbox idempotency.
-3. Implement Phase 4 placeholder runner and video-service status update client.
+1. Implement Phase 6 FFmpeg/FFprobe processing behind the existing processor interface.
+2. Add processed video and thumbnail upload to MinIO.
+3. Implement Phase 7 outgoing lifecycle events or decide that `video-service` is the only lifecycle event producer.
 4. Add local compose or CI wiring for media-worker PostgreSQL integration tests.
 
 Reason:
 
 - `video-service` already writes and publishes `video.uploaded.v1`.
 - The next product gap is turning uploaded videos into processing jobs.
-- A durable job model now exists; the next gap is connecting `video.uploaded.v1` to that model.
+- Consumer, placeholder runner and retry/dead-letter behavior now exist; the next gap is replacing placeholder work with real FFmpeg and output object writes.
 
 ## Update Rule
 
