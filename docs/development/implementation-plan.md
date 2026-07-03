@@ -15,7 +15,7 @@ As of 2026-07-01:
 - `identity-service`: da co auth/profile/JWT/OAuth/JWKS/PostgreSQL/Redis-facing design o muc tot hon cac service khac.
 - `api-gateway`: da co routing, request/correlation ID, JWT verify qua JWKS, trusted user-context forwarding, readiness va basic metrics.
 - `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow, upload idempotency, MinIO/S3 presigned upload URL, optional object metadata verification, owner/internal authorization va Redpanda/Kafka outbox publisher cho `video.uploaded.v1`.
-- `media-worker`, `feed-social-service`, `live-service`: van chu yeu la skeleton.
+- `media-worker`: da co production-shaped scaffold va PostgreSQL job persistence; chua consume event/chay processor. `feed-social-service`, `live-service`: van chu yeu la skeleton.
 - `aiops-service`: da co package layout, chua co RCA pipeline that.
 
 ## Milestone 0: Project Rules And Handoff
@@ -80,8 +80,10 @@ Done criteria:
 
 ## Milestone 3: Media Worker Processing
 
-- `[ ]` Define processing job domain and state machine.
-- `[ ]` Add PostgreSQL migration for `processing_jobs`, `processing_attempts`, `dead_letters`.
+Detailed service checklist: `docs/development/media-worker-implementation-plan.md`.
+
+- `[x]` Define processing job domain and state machine.
+- `[x]` Add PostgreSQL migration for `processing_jobs`, `processing_attempts`, `dead_letters`.
 - `[ ]` Consume `video.uploaded.v1`.
 - `[ ]` Create processing job and first attempt.
 - `[ ]` Add processing placeholder path before real FFmpeg.

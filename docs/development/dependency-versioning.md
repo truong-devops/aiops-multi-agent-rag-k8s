@@ -51,7 +51,7 @@ Các Go service hiện tại đang dùng Go `1.24` với toolchain `go1.24.13`. 
 | `services/video-service` | Go `1.24`, toolchain `go1.24.13` | `github.com/jackc/pgx/v5 v5.8.0`, `github.com/segmentio/kafka-go v0.4.51` |
 | `services/feed-social-service` | Go `1.24`, toolchain `go1.24.13` | none |
 | `services/live-service` | Go `1.24`, toolchain `go1.24.13` | none |
-| `services/media-worker` | Go `1.24`, toolchain `go1.24.13` | none |
+| `services/media-worker` | Go `1.24`, toolchain `go1.24.13` | `github.com/jackc/pgx/v5 v5.8.0` |
 
 Khi bắt đầu thêm thư viện Go, dùng dạng exact module version:
 

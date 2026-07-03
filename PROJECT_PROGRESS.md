@@ -36,7 +36,8 @@ As of 2026-07-02:
 - `identity-service` and `api-gateway` are more implemented than the other product services.
 - `api-gateway` now has route proxying, request/correlation IDs, CORS, body limits, upstream timeout, JWT verification through identity JWKS, trusted user-context forwarding, internal header stripping, JSON gateway/auth errors, readiness checks, and basic Prometheus text metrics.
 - `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation with optional MinIO/S3 object metadata verification, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, local/CI DB integration workflow, idempotent upload intent creation, MinIO/S3 presigned upload URLs, owner/internal authorization, pending outbox writes for `video.uploaded.v1`, and a Redpanda/Kafka outbox publisher worker.
-- Several product services beyond `identity-service`, `api-gateway`, and `video-service` are still mostly skeletons with health, readiness, and metrics placeholders.
+- `media-worker` now has a production-shaped scaffold, config validation, health/readiness/metrics, domain models for processing jobs/attempts/dead letters, PostgreSQL schema and repository, and local in-memory test store. It does not yet consume `video.uploaded.v1` or run processing jobs.
+- Several product services beyond `identity-service`, `api-gateway`, `video-service`, and the first `media-worker` foundation are still mostly skeletons with health, readiness, and metrics placeholders.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
 
 ## Decisions Made
@@ -57,6 +58,19 @@ As of 2026-07-02:
 ## Work Log
 
 ### 2026-07-02
+
+- Implemented `media-worker` Phase 1 and Phase 2 from `docs/development/media-worker-implementation-plan.md`.
+- Replaced the placeholder server with config loading, structured JSON logging, request/correlation middleware, graceful shutdown, readiness checks, and Prometheus text metrics.
+- Added domain models/state rules for processing jobs, attempts, inbox events and dead letters.
+- Added PostgreSQL migration `001_processing_schema.sql`, repository interface, in-memory store, PostgreSQL store, idempotent job creation from uploaded events, job claim/lease, attempt start/success/failure transitions, and a skipped-by-default PostgreSQL integration harness using `MEDIA_WORKER_TEST_DATABASE_URL`.
+- Added `github.com/jackc/pgx/v5 v5.8.0` to `services/media-worker` and updated dependency version docs.
+- Updated `services/media-worker/README.md`, `docs/development/media-worker-implementation-plan.md`, and `docs/development/implementation-plan.md`.
+- Verified with `go test ./...` in `services/media-worker`.
+- Notes for next session: implement Phase 3 Kafka consumer for `video.uploaded.v1`, parse the video-service envelope, and create durable jobs through the new service/repository layer.
+
+- Added `docs/development/media-worker-implementation-plan.md` as the focused roadmap/checklist for `media-worker`.
+- Linked the new media-worker plan from `docs/development/README.md` and the high-level implementation plan.
+- Notes for next session: this plan is now the source of truth for remaining media-worker phases.
 
 - Finished the remaining `video-service` hardening pass before moving to `media-worker`.
 - Added optional MinIO/S3 object metadata verification for upload confirmation through `VERIFY_UPLOAD_OBJECT=true`, including HEAD-based object checks, stable object-storage error codes, size/content-type mismatch handling, and object verification metrics.
@@ -171,8 +185,8 @@ Recommended engineering order:
 
 1. Keep `identity-service` and `api-gateway` stable as the edge/auth foundation.
 2. Add Redis-backed rate limiting to `api-gateway` when the edge/auth foundation needs another hardening pass.
-3. Define the `media-worker` processing contract with `video-service`.
-4. Implement `media-worker` processing job persistence, retries, dead-letter state, and status updates.
+3. Implement the `media-worker` Kafka consumer for `video.uploaded.v1`.
+4. Implement `media-worker` processing runner, retry/dead-letter policy, and video-service status updates.
 5. Add Kubernetes/GitOps manifests and smoke tests for `video-service` when preparing deployment.
 6. Implement a minimal ready-video feed in `feed-social-service`.
 7. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
@@ -191,6 +205,7 @@ Recommended documentation order:
 - Scope risk: building too much product surface before the core incident/RCA loop works.
 - Evaluation risk: Multi-Agent RAG needs clear baselines and measurable criteria, not only a demo.
 - Implementation risk: remaining skeleton services need real config, persistence, APIs, events, tests, and observability before they feel production-shaped.
+- Media-worker risk: scaffold and job persistence exist, but Kafka consumption, processing runner, MinIO I/O, video-service status updates, retry policy, and FFmpeg are still pending.
 - Video-service risk: upload idempotency, MinIO presigned URL, optional object metadata verification and Redpanda/Kafka outbox publishing exist, but richer outbox backoff controls, Kubernetes/GitOps manifests, smoke tests, and the `media-worker` processing contract are still pending.
 - Gateway risk: Redis-backed rate limiting and richer route/upstream metrics are still pending.
 - DevSecOps risk: security scans, CI, GitOps history, and deployment evidence must become real inputs to RCA, not decorative pipeline items.
