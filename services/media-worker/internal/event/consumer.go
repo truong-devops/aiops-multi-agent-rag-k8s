@@ -16,6 +16,7 @@ type UploadedEventService interface {
 
 type ConsumerMetrics interface {
 	RecordJobOperation(operation string, outcome string)
+	RecordEventAge(source string, outcome string, age time.Duration)
 }
 
 type Message struct {
@@ -77,19 +78,21 @@ func (c *KafkaConsumer) Close() error {
 }
 
 type UploadedConsumerWorker struct {
-	consumer MessageConsumer
-	service  UploadedEventService
-	logger   *slog.Logger
-	metrics  ConsumerMetrics
-	now      func() time.Time
+	consumer    MessageConsumer
+	service     UploadedEventService
+	logger      *slog.Logger
+	metrics     ConsumerMetrics
+	environment string
+	now         func() time.Time
 }
 
 type UploadedConsumerConfig struct {
-	Consumer MessageConsumer
-	Service  UploadedEventService
-	Logger   *slog.Logger
-	Metrics  ConsumerMetrics
-	Now      func() time.Time
+	Consumer    MessageConsumer
+	Service     UploadedEventService
+	Logger      *slog.Logger
+	Metrics     ConsumerMetrics
+	Environment string
+	Now         func() time.Time
 }
 
 func NewUploadedConsumerWorker(config UploadedConsumerConfig) *UploadedConsumerWorker {
@@ -102,11 +105,12 @@ func NewUploadedConsumerWorker(config UploadedConsumerConfig) *UploadedConsumerW
 		now = time.Now
 	}
 	return &UploadedConsumerWorker{
-		consumer: config.Consumer,
-		service:  config.Service,
-		logger:   logger,
-		metrics:  config.Metrics,
-		now:      now,
+		consumer:    config.Consumer,
+		service:     config.Service,
+		logger:      logger,
+		metrics:     config.Metrics,
+		environment: defaultEnvironment(config.Environment),
+		now:         now,
 	}
 }
 
@@ -114,24 +118,24 @@ func (w *UploadedConsumerWorker) Run(ctx context.Context) {
 	if w == nil || w.consumer == nil || w.service == nil {
 		return
 	}
-	w.logger.Info("uploaded event consumer started")
+	w.logger.Info("uploaded event consumer started", "service", "media-worker", "environment", w.environment)
 	for {
 		if ctx.Err() != nil {
-			w.logger.Info("uploaded event consumer stopped")
+			w.logger.Info("uploaded event consumer stopped", "service", "media-worker", "environment", w.environment)
 			return
 		}
 		message, err := w.consumer.Fetch(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				w.logger.Info("uploaded event consumer stopped")
+				w.logger.Info("uploaded event consumer stopped", "service", "media-worker", "environment", w.environment)
 				return
 			}
 			w.record("consume", "fetch_error")
-			w.logger.Error("failed to fetch uploaded event", "error", err)
+			w.logger.Error("failed to fetch uploaded event", "service", "media-worker", "environment", w.environment, "error", err)
 			continue
 		}
 		if err := w.Handle(ctx, message); err != nil {
-			w.logger.Error("failed to handle uploaded event", "error", err)
+			w.logger.Error("failed to handle uploaded event", "service", "media-worker", "environment", w.environment, "error", err)
 		}
 	}
 }
@@ -141,7 +145,8 @@ func (w *UploadedConsumerWorker) Handle(ctx context.Context, message Message) er
 	event, err := ParseUploadedEvent(message.Value, receivedAt)
 	if err != nil {
 		w.record("consume", "invalid")
-		w.logger.Error("invalid uploaded event", "error", err)
+		w.recordEventAge("invalid", receivedAt, message.Time)
+		w.logger.Error("invalid uploaded event", "service", "media-worker", "environment", w.environment, "error", err)
 		if commitErr := w.consumer.Commit(ctx, message); commitErr != nil {
 			w.record("consume", "commit_error")
 			return commitErr
@@ -151,6 +156,7 @@ func (w *UploadedConsumerWorker) Handle(ctx context.Context, message Message) er
 	job, created, err := w.service.RegisterUploadedEvent(ctx, event)
 	if err != nil {
 		w.record("consume", "handler_error")
+		w.recordEventAge("handler_error", receivedAt, event.OccurredAt)
 		return err
 	}
 	outcome := "created"
@@ -158,12 +164,15 @@ func (w *UploadedConsumerWorker) Handle(ctx context.Context, message Message) er
 		outcome = "duplicate"
 	}
 	w.record("consume", outcome)
+	w.recordEventAge(outcome, receivedAt, event.OccurredAt)
 	if err := w.consumer.Commit(ctx, message); err != nil {
 		w.record("consume", "commit_error")
 		return err
 	}
 	w.logger.Info(
 		"uploaded event consumed",
+		"service", "media-worker",
+		"environment", w.environment,
 		"job_id", job.ID,
 		"video_id", job.VideoID,
 		"event_id", event.EventID,
@@ -185,4 +194,18 @@ func (w *UploadedConsumerWorker) record(operation string, outcome string) {
 	if w.metrics != nil {
 		w.metrics.RecordJobOperation(operation, outcome)
 	}
+}
+
+func (w *UploadedConsumerWorker) recordEventAge(outcome string, receivedAt time.Time, occurredAt time.Time) {
+	if w.metrics == nil || occurredAt.IsZero() {
+		return
+	}
+	w.metrics.RecordEventAge("video.uploaded", outcome, receivedAt.Sub(occurredAt.UTC()))
+}
+
+func defaultEnvironment(value string) string {
+	if value == "" {
+		return "local"
+	}
+	return value
 }

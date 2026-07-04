@@ -74,6 +74,33 @@ func TestMemoryStoreClaimAndAttempts(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreStats(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	event := uploadedEvent(now.Add(-2 * time.Minute))
+	job, err := domain.NewProcessingJobFromUploadedEvent(event, "raw-videos", 3, now.Add(-2*time.Minute))
+	if err != nil {
+		t.Fatalf("NewProcessingJobFromUploadedEvent() error = %v", err)
+	}
+	if _, _, err := store.CreateJobFromUploadedEvent(context.Background(), event, job); err != nil {
+		t.Fatalf("CreateJobFromUploadedEvent() error = %v", err)
+	}
+
+	stats, err := store.Stats(context.Background(), now)
+	if err != nil {
+		t.Fatalf("Stats() error = %v", err)
+	}
+	if stats.JobStatusCounts[domain.JobStatusQueued] != 1 {
+		t.Fatalf("status counts = %#v", stats.JobStatusCounts)
+	}
+	if stats.RunnableCount != 1 {
+		t.Fatalf("RunnableCount = %d", stats.RunnableCount)
+	}
+	if stats.OldestRunnableAge != 2*time.Minute {
+		t.Fatalf("OldestRunnableAge = %s", stats.OldestRunnableAge)
+	}
+}
+
 func uploadedEvent(now time.Time) domain.UploadedVideoEvent {
 	return domain.UploadedVideoEvent{
 		EventID:       "evt_123",

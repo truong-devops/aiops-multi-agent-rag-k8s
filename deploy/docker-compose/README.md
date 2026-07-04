@@ -3,7 +3,7 @@
 Local compose dùng để chạy nhanh dependencies:
 
 - PostgreSQL.
-- PostgreSQL test profile for `video-service` integration tests.
+- PostgreSQL test profile for `video-service` and `media-worker` integration tests.
 - Redis.
 - MinIO.
 - Redpanda/Kafka.
@@ -16,4 +16,16 @@ Run the disposable `video-service` PostgreSQL test database and integration test
 
 ```bash
 make test-video-integration
+```
+
+Run the disposable `media-worker` PostgreSQL test database and integration tests with:
+
+```bash
+make test-media-integration
+```
+
+Run the local FFmpeg processor smoke test with:
+
+```bash
+make smoke-media-ffmpeg
 ```

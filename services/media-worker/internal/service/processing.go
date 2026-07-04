@@ -23,6 +23,7 @@ type ProcessingService struct {
 	statusClient client.VideoStatusClient
 	metrics      MetricsRecorder
 	logger       *slog.Logger
+	environment  string
 	now          func() time.Time
 }
 
@@ -36,11 +37,15 @@ type Options struct {
 	StatusClient client.VideoStatusClient
 	Metrics      MetricsRecorder
 	Logger       *slog.Logger
+	Environment  string
 	Now          func() time.Time
 }
 
 type MetricsRecorder interface {
 	RecordJobOperation(operation string, outcome string)
+	RecordJobStatus(status string, count int64)
+	RecordQueueState(queue string, depth int64, oldestAge time.Duration)
+	RecordAttemptOutcome(outcome string, errorCode string)
 }
 
 func NewProcessingService(store repository.Store, options Options) *ProcessingService {
@@ -64,6 +69,10 @@ func NewProcessingService(store repository.Store, options Options) *ProcessingSe
 	if logger == nil {
 		logger = slog.Default()
 	}
+	environment := options.Environment
+	if environment == "" {
+		environment = "local"
+	}
 	return &ProcessingService{
 		store:        store,
 		rawBucket:    options.RawBucket,
@@ -75,6 +84,7 @@ func NewProcessingService(store repository.Store, options Options) *ProcessingSe
 		statusClient: options.StatusClient,
 		metrics:      options.Metrics,
 		logger:       logger,
+		environment:  environment,
 		now:          now,
 	}
 }
@@ -95,6 +105,9 @@ func (s *ProcessingService) RegisterUploadedEvent(ctx context.Context, event dom
 	if created {
 		s.logger.Info(
 			"processing job created",
+			"service", "media-worker",
+			"environment", s.environment,
+			"worker_id", s.workerID,
 			"job_id", createdJob.ID,
 			"video_id", createdJob.VideoID,
 			"request_id", createdJob.RequestID,
@@ -103,6 +116,9 @@ func (s *ProcessingService) RegisterUploadedEvent(ctx context.Context, event dom
 	} else {
 		s.logger.Info(
 			"processing job reused for duplicate event",
+			"service", "media-worker",
+			"environment", s.environment,
+			"worker_id", s.workerID,
 			"job_id", createdJob.ID,
 			"video_id", createdJob.VideoID,
 			"event_id", event.EventID,
@@ -119,6 +135,7 @@ func (s *ProcessingService) Ready(ctx context.Context) error {
 
 func (s *ProcessingService) RunOnce(ctx context.Context) error {
 	now := s.now().UTC()
+	s.recordStoreStats(ctx, now)
 	jobs, err := s.store.ClaimRunnableJobs(ctx, s.workerID, now, s.leaseTTL, s.batchSize)
 	if err != nil {
 		s.record("runner", "claim_error")
@@ -128,6 +145,9 @@ func (s *ProcessingService) RunOnce(ctx context.Context) error {
 		if err := s.ProcessJob(ctx, job); err != nil {
 			s.logger.Error(
 				"processing job failed",
+				"service", "media-worker",
+				"environment", s.environment,
+				"worker_id", s.workerID,
 				"job_id", job.ID,
 				"video_id", job.VideoID,
 				"error", err,
@@ -137,6 +157,7 @@ func (s *ProcessingService) RunOnce(ctx context.Context) error {
 	if len(jobs) > 0 {
 		s.record("runner", "claimed")
 	}
+	s.recordStoreStats(ctx, s.now().UTC())
 	return nil
 }
 
@@ -144,14 +165,14 @@ func (s *ProcessingService) Run(ctx context.Context, pollInterval time.Duration)
 	if pollInterval <= 0 {
 		pollInterval = 5 * time.Second
 	}
-	s.logger.Info("processing runner started", "poll_interval", pollInterval.String(), "worker_id", s.workerID)
+	s.logger.Info("processing runner started", "service", "media-worker", "environment", s.environment, "poll_interval", pollInterval.String(), "worker_id", s.workerID)
 	_ = s.RunOnce(ctx)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.Info("processing runner stopped", "worker_id", s.workerID)
+			s.logger.Info("processing runner stopped", "service", "media-worker", "environment", s.environment, "worker_id", s.workerID)
 			return
 		case <-ticker.C:
 			_ = s.RunOnce(ctx)
@@ -176,6 +197,7 @@ func (s *ProcessingService) ProcessJob(ctx context.Context, claimed domain.Proce
 		if markErr != nil {
 			return markErr
 		}
+		s.recordAttempt("failed", decision.ErrorCode)
 		return err
 	}
 	if s.processor == nil {
@@ -191,6 +213,11 @@ func (s *ProcessingService) ProcessJob(ctx context.Context, claimed domain.Proce
 		if decision.DeadLetter {
 			_ = s.updateVideoStatus(ctx, updated, "failed", "worker_failed", decision.ErrorCode)
 		}
+		if decision.DeadLetter {
+			s.recordAttempt("dead_letter", decision.ErrorCode)
+		} else {
+			s.recordAttempt("retry_scheduled", decision.ErrorCode)
+		}
 		return err
 	}
 	if err := s.updateVideoStatus(ctx, job, "ready", "worker_completed", ""); err != nil {
@@ -203,6 +230,7 @@ func (s *ProcessingService) ProcessJob(ctx context.Context, claimed domain.Proce
 		if markErr != nil {
 			return markErr
 		}
+		s.recordAttempt("failed", decision.ErrorCode)
 		return err
 	}
 	_, err = s.store.MarkAttemptSucceeded(ctx, job.ID, attempt.ID, s.now().UTC(), result.Metrics)
@@ -211,8 +239,12 @@ func (s *ProcessingService) ProcessJob(ctx context.Context, claimed domain.Proce
 		return err
 	}
 	s.record("attempt", "succeeded")
+	s.recordAttempt("succeeded", "")
 	s.logger.Info(
 		"processing job succeeded",
+		"service", "media-worker",
+		"environment", s.environment,
+		"worker_id", s.workerID,
 		"job_id", job.ID,
 		"attempt_id", attempt.ID,
 		"video_id", job.VideoID,
@@ -258,6 +290,20 @@ func (s *ProcessingService) markFailed(ctx context.Context, job domain.Processin
 	} else {
 		s.record("attempt", "retry_scheduled")
 	}
+	s.logger.Error(
+		"processing attempt failed",
+		"service", "media-worker",
+		"environment", s.environment,
+		"worker_id", s.workerID,
+		"job_id", job.ID,
+		"attempt_id", attempt.ID,
+		"video_id", job.VideoID,
+		"error_code", decision.ErrorCode,
+		"dead_letter", decision.DeadLetter,
+		"retryable", decision.Retryable,
+		"request_id", job.RequestID,
+		"correlation_id", job.CorrelationID,
+	)
 	return updated, nil
 }
 
@@ -285,4 +331,36 @@ func (s *ProcessingService) record(operation string, outcome string) {
 	if s.metrics != nil {
 		s.metrics.RecordJobOperation(operation, outcome)
 	}
+}
+
+func (s *ProcessingService) recordAttempt(outcome string, errorCode string) {
+	if s.metrics != nil {
+		s.metrics.RecordAttemptOutcome(outcome, errorCode)
+	}
+}
+
+func (s *ProcessingService) recordStoreStats(ctx context.Context, now time.Time) {
+	if s.metrics == nil || s.store == nil {
+		return
+	}
+	stats, err := s.store.Stats(ctx, now)
+	if err != nil {
+		s.record("stats", "error")
+		return
+	}
+	for _, status := range []string{
+		domain.JobStatusQueued,
+		domain.JobStatusRunning,
+		domain.JobStatusRetrying,
+		domain.JobStatusSucceeded,
+		domain.JobStatusFailed,
+		domain.JobStatusDeadLetter,
+		domain.JobStatusCancelled,
+	} {
+		s.metrics.RecordJobStatus(status, 0)
+	}
+	for status, count := range stats.JobStatusCounts {
+		s.metrics.RecordJobStatus(status, count)
+	}
+	s.metrics.RecordQueueState("processing", stats.RunnableCount, stats.OldestRunnableAge)
 }

@@ -35,6 +35,24 @@ services:
       timeout: 5s
       retries: 10
 
+  postgres-media-test:
+    image: postgres:16-alpine
+    profiles:
+      - test
+    environment:
+      POSTGRES_USER: media
+      POSTGRES_PASSWORD: media
+      POSTGRES_DB: media_test
+    ports:
+      - "${POSTGRES_MEDIA_TEST_PORT:-55433}:5432"
+    volumes:
+      - postgres_media_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U media -d media_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
     ports:
@@ -106,6 +124,7 @@ services:
 volumes:
   postgres_data:
   postgres_test_data:
+  postgres_media_test_data:
   redis_data:
   minio_data:
   redpanda_data:

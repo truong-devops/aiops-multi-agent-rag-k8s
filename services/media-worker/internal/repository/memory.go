@@ -233,6 +233,35 @@ func (s *MemoryStore) MarkAttemptFailed(_ context.Context, jobID string, attempt
 	return job, nil
 }
 
+func (s *MemoryStore) Stats(_ context.Context, now time.Time) (StoreStats, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now = now.UTC()
+	stats := StoreStats{JobStatusCounts: map[string]int64{}}
+	var oldestRunnable *time.Time
+	for _, job := range s.jobs {
+		stats.JobStatusCounts[job.Status]++
+		if job.Status != domain.JobStatusQueued && job.Status != domain.JobStatusRetrying {
+			continue
+		}
+		if job.NextRunAt.After(now) {
+			continue
+		}
+		if job.LockedUntil != nil && job.LockedUntil.After(now) {
+			continue
+		}
+		stats.RunnableCount++
+		nextRunAt := job.NextRunAt
+		if oldestRunnable == nil || nextRunAt.Before(*oldestRunnable) {
+			oldestRunnable = &nextRunAt
+		}
+	}
+	if oldestRunnable != nil && oldestRunnable.Before(now) {
+		stats.OldestRunnableAge = now.Sub(*oldestRunnable)
+	}
+	return stats, nil
+}
+
 func (s *MemoryStore) Ping(context.Context) error {
 	return nil
 }

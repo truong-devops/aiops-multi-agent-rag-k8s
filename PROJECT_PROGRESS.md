@@ -26,7 +26,7 @@ Keep entries concise. This file should help the next session continue, not becom
 
 ## Current State
 
-As of 2026-07-03:
+As of 2026-07-04:
 
 - The project direction is set: a Kubernetes-based microservices video/livestream platform used as a realistic testbed for AIOps RCA with Multi-Agent RAG, DevSecOps evidence, and GitOps-safe remediation.
 - The thesis framing is centered on Multi-Agent RAG for incident investigation and root cause analysis, not on building a commercial video product for its own sake.
@@ -36,7 +36,7 @@ As of 2026-07-03:
 - `identity-service` and `api-gateway` are more implemented than the other product services.
 - `api-gateway` now has route proxying, request/correlation IDs, CORS, body limits, upstream timeout, JWT verification through identity JWKS, trusted user-context forwarding, internal header stripping, JSON gateway/auth errors, readiness checks, and basic Prometheus text metrics.
 - `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation with optional MinIO/S3 object metadata verification, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, local/CI DB integration workflow, idempotent upload intent creation, MinIO/S3 presigned upload URLs, owner/internal authorization, pending outbox writes for `video.uploaded.v1`, and a Redpanda/Kafka outbox publisher worker.
-- `media-worker` now has a production-shaped scaffold, config validation, health/readiness/metrics, domain models for processing jobs/attempts/dead letters, PostgreSQL schema and repository, local in-memory test store, Kafka consumer for `video.uploaded.v1`, placeholder processing runner, FFmpeg/FFprobe processing mode, MinIO raw download/output upload, thumbnail generation, video-service internal status update client, retry/backoff, dead-letter behavior, and lifecycle event contract builders.
+- `media-worker` now has a production-shaped scaffold, config validation, health/readiness/metrics, domain models for processing jobs/attempts/dead letters, PostgreSQL schema and repository, local in-memory test store, Kafka consumer for `video.uploaded.v1`, placeholder processing runner, FFmpeg/FFprobe processing mode, MinIO raw download/output upload, thumbnail generation, video-service internal status update client, retry/backoff, dead-letter behavior, lifecycle event contract builders, richer operational metrics/logging, a PostgreSQL integration-test target, and an FFmpeg smoke test.
 - Several product services beyond `identity-service`, `api-gateway`, `video-service`, and the first `media-worker` foundation are still mostly skeletons with health, readiness, and metrics placeholders.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
 
@@ -57,6 +57,18 @@ As of 2026-07-03:
 - `video-service` remains the canonical video lifecycle event producer for now; `media-worker` updates status through the internal API and keeps lifecycle event contracts ready for a future direct outbox only if needed.
 
 ## Work Log
+
+### 2026-07-04
+
+- Implemented `media-worker` Phase 8 observability work from `docs/development/media-worker-implementation-plan.md`.
+- Added job status gauges, runnable queue depth/oldest-age gauges, attempt outcome/error-code counters, observed `video.uploaded.v1` event age counters, database operation metrics, MinIO dependency metrics, and video-service status update dependency metrics.
+- Added repository `Stats` support for in-memory and PostgreSQL stores plus a store instrumentation wrapper.
+- Added MinIO object-store and video-service status-client instrumentation wrappers.
+- Expanded worker/consumer logs with service, environment, worker, job, attempt, video, request, correlation and error-code context.
+- Added `make test-media`, `make test-media-integration`, `make smoke-media-ffmpeg`, a `postgres-media-test` compose service, and a smoke-tag FFmpeg processor test.
+- Verified with `go test ./...` in `services/media-worker`, `docker compose --profile test config`, `make -n test-media-integration`, `make -n smoke-media-ffmpeg`, and `make smoke-media-ffmpeg`.
+- Could not run `make test-media-integration` because the local Docker daemon was not running.
+- Notes for next session: add Kubernetes/GitOps manifests and resource sizing for `video-service`/`media-worker`, then add a full compose smoke test from upload event to processing status update.
 
 ### 2026-07-03
 
@@ -204,13 +216,12 @@ Recommended engineering order:
 
 1. Keep `identity-service` and `api-gateway` stable as the edge/auth foundation.
 2. Add Redis-backed rate limiting to `api-gateway` when the edge/auth foundation needs another hardening pass.
-3. Add richer media-worker observability metrics for queue lag, object storage and upstream status updates.
-4. Add a local sample-video smoke test for `PROCESSING_MODE=ffmpeg`.
-5. Add Kubernetes/GitOps manifests and smoke tests for `video-service` and `media-worker` when preparing deployment.
-6. Implement a minimal ready-video feed in `feed-social-service`.
-7. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
-8. Define incident fixtures, runbooks, ground truth, and evaluation metrics.
-9. Implement `aiops-service` evidence schema, collectors, RAG pipeline, agents, RCA synthesis, and evaluator.
+3. Add Kubernetes/GitOps manifests and resource requests/limits for `video-service` and `media-worker`.
+4. Add a full compose smoke test for the video upload-to-processing flow.
+5. Implement a minimal ready-video feed in `feed-social-service`.
+6. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
+7. Define incident fixtures, runbooks, ground truth, and evaluation metrics.
+8. Implement `aiops-service` evidence schema, collectors, RAG pipeline, agents, RCA synthesis, and evaluator.
 
 Recommended documentation order:
 
@@ -224,7 +235,7 @@ Recommended documentation order:
 - Scope risk: building too much product surface before the core incident/RCA loop works.
 - Evaluation risk: Multi-Agent RAG needs clear baselines and measurable criteria, not only a demo.
 - Implementation risk: remaining skeleton services need real config, persistence, APIs, events, tests, and observability before they feel production-shaped.
-- Media-worker risk: scaffold, job persistence, Kafka consumption, placeholder/FFmpeg processors, video-service status updates, MinIO output upload and retry/dead-letter exist, but richer queue-lag/object-storage/upstream metrics, local sample-video smoke tests and deployment manifests are still pending.
+- Media-worker risk: scaffold, job persistence, Kafka consumption, placeholder/FFmpeg processors, video-service status updates, MinIO output upload, retry/dead-letter, richer metrics/logs and FFmpeg smoke tests exist, but Kubernetes/GitOps manifests, resource sizing and full upload-to-processing smoke tests are still pending.
 - Video-service risk: upload idempotency, MinIO presigned URL, optional object metadata verification and Redpanda/Kafka outbox publishing exist, but richer outbox backoff controls, Kubernetes/GitOps manifests, smoke tests, and the `media-worker` processing contract are still pending.
 - Gateway risk: Redis-backed rate limiting and richer route/upstream metrics are still pending.
 - DevSecOps risk: security scans, CI, GitOps history, and deployment evidence must become real inputs to RCA, not decorative pipeline items.

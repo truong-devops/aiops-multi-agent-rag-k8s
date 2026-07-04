@@ -13,6 +13,12 @@ type ListJobsFilter struct {
 	Limit   int
 }
 
+type StoreStats struct {
+	JobStatusCounts   map[string]int64
+	RunnableCount     int64
+	OldestRunnableAge time.Duration
+}
+
 type Store interface {
 	CreateJobFromUploadedEvent(ctx context.Context, event domain.UploadedVideoEvent, job domain.ProcessingJob) (domain.ProcessingJob, bool, error)
 	FindJobByID(ctx context.Context, id string) (domain.ProcessingJob, error)
@@ -22,5 +28,6 @@ type Store interface {
 	StartAttempt(ctx context.Context, jobID string, workerID string, now time.Time) (domain.ProcessingJob, domain.ProcessingAttempt, error)
 	MarkAttemptSucceeded(ctx context.Context, jobID string, attemptID string, now time.Time, metrics []byte) (domain.ProcessingJob, error)
 	MarkAttemptFailed(ctx context.Context, jobID string, attemptID string, now time.Time, errorCode string, errorMessage string, retryAt *time.Time, deadLetter *domain.DeadLetter) (domain.ProcessingJob, error)
+	Stats(ctx context.Context, now time.Time) (StoreStats, error)
 	Ping(ctx context.Context) error
 }

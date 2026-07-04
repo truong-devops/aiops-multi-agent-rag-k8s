@@ -362,6 +362,48 @@ func (s *PostgresStore) MarkAttemptFailed(ctx context.Context, jobID string, att
 	return job, nil
 }
 
+func (s *PostgresStore) Stats(ctx context.Context, now time.Time) (StoreStats, error) {
+	stats := StoreStats{JobStatusCounts: map[string]int64{}}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT status, COUNT(*)
+		FROM processing_jobs
+		GROUP BY status
+	`)
+	if err != nil {
+		return StoreStats{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var status string
+		var count int64
+		if err := rows.Scan(&status, &count); err != nil {
+			return StoreStats{}, err
+		}
+		stats.JobStatusCounts[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return StoreStats{}, err
+	}
+
+	var runnableCount int64
+	var oldestNextRunAt sql.NullTime
+	err = s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(next_run_at)
+		FROM processing_jobs
+		WHERE status IN ($2, $3)
+		  AND next_run_at <= $1
+		  AND (locked_until IS NULL OR locked_until <= $1)
+	`, now.UTC(), domain.JobStatusQueued, domain.JobStatusRetrying).Scan(&runnableCount, &oldestNextRunAt)
+	if err != nil {
+		return StoreStats{}, err
+	}
+	stats.RunnableCount = runnableCount
+	if oldestNextRunAt.Valid && oldestNextRunAt.Time.Before(now.UTC()) {
+		stats.OldestRunnableAge = now.UTC().Sub(oldestNextRunAt.Time)
+	}
+	return stats, nil
+}
+
 type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }

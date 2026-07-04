@@ -33,23 +33,27 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
 
-	store, closeStore, err := openStore(context.Background(), cfg, logger)
+	metrics := observability.NewMetrics()
+	store, closeStore, err := openStore(context.Background(), cfg, logger, metrics)
 	if err != nil {
 		logger.Error("failed to initialize processing store", "service", serviceName, "error", err)
 		os.Exit(1)
 	}
 	defer closeStore()
 
-	metrics := observability.NewMetrics()
 	objectStore, err := newObjectStore(cfg)
 	if err != nil {
 		logger.Error("failed to initialize object store", "service", serviceName, "error", err)
 		os.Exit(1)
 	}
+	objectStore = storage.NewInstrumentedObjectStore(objectStore, metrics)
 	statusClient, err := newStatusClient(cfg)
 	if err != nil {
 		logger.Error("failed to initialize video status client", "service", serviceName, "error", err)
 		os.Exit(1)
+	}
+	if statusClient != nil {
+		statusClient = client.NewInstrumentedVideoStatusClient(statusClient, metrics)
 	}
 	videoProcessor, err := newProcessor(cfg, objectStore)
 	if err != nil {
@@ -66,6 +70,7 @@ func main() {
 		StatusClient: statusClient,
 		Metrics:      metrics,
 		Logger:       logger,
+		Environment:  cfg.Environment,
 	})
 
 	mux := http.NewServeMux()
@@ -118,14 +123,15 @@ func main() {
 	logger.Info("service stopped", "service", serviceName)
 }
 
-func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger) (repository.Store, func(), error) {
+func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger, metrics *observability.Metrics) (repository.Store, func(), error) {
 	if cfg.UsePostgres() {
 		store, err := repository.NewPostgresStore(ctx, cfg.DatabaseURL)
 		if err != nil {
 			return nil, nil, err
 		}
 		logger.Info("using postgres processing store", "service", serviceName)
-		return store, func() {
+		instrumented := repository.NewInstrumentedStore(store, metrics)
+		return instrumented, func() {
 			if err := store.Close(); err != nil {
 				logger.Error("failed to close processing store", "service", serviceName, "error", err)
 			}
@@ -133,7 +139,7 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger) (rep
 	}
 
 	logger.Warn("using in-memory processing store; this is only suitable for local development", "service", serviceName, "environment", cfg.Environment)
-	return repository.NewMemoryStore(), func() {}, nil
+	return repository.NewInstrumentedStore(repository.NewMemoryStore(), metrics), func() {}, nil
 }
 
 func newObjectStore(cfg config.Config) (storage.ObjectStore, error) {
@@ -187,10 +193,11 @@ func startUploadedConsumer(ctx context.Context, cfg config.Config, processingSer
 		GroupID: cfg.ConsumerGroup,
 	})
 	worker := event.NewUploadedConsumerWorker(event.UploadedConsumerConfig{
-		Consumer: consumer,
-		Service:  processingService,
-		Logger:   logger,
-		Metrics:  metrics,
+		Consumer:    consumer,
+		Service:     processingService,
+		Logger:      logger,
+		Metrics:     metrics,
+		Environment: cfg.Environment,
 	})
 	go worker.Run(ctx)
 	return func() {

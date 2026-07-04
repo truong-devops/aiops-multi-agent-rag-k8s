@@ -80,14 +80,17 @@ Implemented now:
 - FFmpeg processor mode that downloads the raw object from MinIO/S3, extracts metadata with FFprobe, transcodes an MP4 output, generates a JPEG thumbnail, uploads both outputs, and records processing metrics.
 - HTTP client for video-service internal status updates through `X-Internal-Token`.
 - Retry/backoff policy and stable processing error codes.
+- Operational metrics for job status, runnable queue age/depth, attempt outcome/error code, database operations, MinIO operations, video-service status updates and observed `video.uploaded.v1` event age.
+- Structured logs that include service, environment, worker, job, attempt, video, request, correlation and error-code context on worker paths.
 - Lifecycle event contract builders for `video.processing_started.v1`, `video.ready.v1`, and `video.processing_failed.v1`; direct worker publishing is deferred while `video-service` remains the canonical lifecycle event producer.
 - Unit tests and skipped-by-default PostgreSQL integration harness.
+- FFmpeg smoke test behind the `smoke` build tag.
 
 Still pending:
 
-- Richer queue lag, object storage and upstream latency metrics.
-- Local sample-video smoke test for `PROCESSING_MODE=ffmpeg`.
 - Direct media-worker lifecycle outbox/publisher only if downstream requirements need worker-owned lifecycle events.
+- Kubernetes/GitOps manifests and resource sizing for CPU-heavy FFmpeg work.
+- Full compose smoke test from upload event to processing status update.
 - Redis locks/idempotency cache, if needed after PostgreSQL behavior is stable.
 
 ## Dependencies Dự Kiến
@@ -112,8 +115,22 @@ Still pending:
 go test ./...
 ```
 
+Run the FFmpeg processor smoke test with a generated sample video:
+
+```bash
+go test -tags smoke ./internal/processor -run TestFFmpegProcessorSmoke -count=1
+```
+
 PostgreSQL repository integration tests are skipped by default. To run them, provide a disposable database URL:
 
 ```bash
 MEDIA_WORKER_TEST_DATABASE_URL='postgres://media:media@localhost:5432/media_db?sslmode=disable' go test ./internal/repository
+```
+
+From the repository root, the same checks are available as:
+
+```bash
+make test-media
+make test-media-integration
+make smoke-media-ffmpeg
 ```

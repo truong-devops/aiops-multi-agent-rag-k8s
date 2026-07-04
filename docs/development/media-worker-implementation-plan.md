@@ -34,7 +34,7 @@ As of 2026-07-03:
 - `[x]` Da update video status qua `video-service` khi `RUNNER_ENABLED=true`.
 - `[x]` Da co MinIO raw object metadata check, raw object download, processed output upload va thumbnail upload.
 - `[x]` Da co processing placeholder.
-- `[~]` Da co metrics/logs cho consumer, runner, retry/dead-letter; chua co FFmpeg-specific metrics.
+- `[x]` Da co metrics/logs cho consumer, runner, retry/dead-letter, queue age/depth, MinIO/video-service dependencies va FFmpeg processor evidence.
 
 ## Boundary
 
@@ -352,13 +352,13 @@ Done criteria:
 
 ## Phase 8: Observability And Incident Evidence
 
-- `[ ]` Add metrics for jobs by status.
-- `[ ]` Add metrics for attempts by outcome/error code.
-- `[ ]` Add metrics for retry/dead-letter counts.
-- `[ ]` Add metrics for Kafka consume lag or observed event age.
-- `[ ]` Add metrics for MinIO read/write latency and errors.
-- `[ ]` Add metrics for video-service status update latency/errors.
-- `[ ]` Add structured logs with `service`, `environment`, `worker_id`, `job_id`, `attempt_id`, `video_id`, `request_id`, `correlation_id`, `error_code`.
+- `[x]` Add metrics for jobs by status.
+- `[x]` Add metrics for attempts by outcome/error code.
+- `[x]` Add metrics for retry/dead-letter counts.
+- `[x]` Add metrics for Kafka consume lag or observed event age.
+- `[x]` Add metrics for MinIO read/write latency and errors.
+- `[x]` Add metrics for video-service status update latency/errors.
+- `[x]` Add structured logs with `service`, `environment`, `worker_id`, `job_id`, `attempt_id`, `video_id`, `request_id`, `correlation_id`, `error_code`.
 - `[ ]` Add optional OpenTelemetry trace propagation.
 
 Done criteria:
@@ -368,13 +368,13 @@ Done criteria:
 ## Phase 9: Deployment Readiness
 
 - `[x]` Dockerfile exists.
-- `[ ]` Add service env documentation for DB, Kafka, MinIO, video-service API and mode.
-- `[ ]` Add local compose dependencies when needed.
+- `[x]` Add service env documentation for DB, Kafka, MinIO, video-service API and mode.
+- `[x]` Add local compose dependencies when needed.
 - `[ ]` Add Kubernetes/GitOps manifests in companion repo when ready.
 - `[ ]` Add resource requests/limits suitable for CPU-heavy work.
-- `[ ]` Add liveness/readiness probes.
-- `[ ]` Add secret/config references without hard-coded credentials.
-- `[ ]` Add smoke test for upload event to processing job flow.
+- `[x]` Add liveness/readiness probes.
+- `[x]` Add secret/config references without hard-coded credentials.
+- `[~]` Add smoke test for upload event to processing job flow.
 
 Done criteria:
 
@@ -386,17 +386,16 @@ Done criteria:
 
 Next best engineering task:
 
-1. Add richer Phase 8 observability: queue lag, job status gauges, MinIO latency/error counters and video-service status update latency.
-2. Add local compose or CI wiring for media-worker PostgreSQL integration tests.
-3. Add a small local sample-video smoke test for `PROCESSING_MODE=ffmpeg`.
-4. Add Kubernetes/GitOps manifests after the local worker flow is stable.
+1. Add Kubernetes/GitOps manifests after the local worker flow is stable.
+2. Add resource requests/limits suitable for CPU-heavy FFmpeg work.
+3. Add full compose smoke test that covers `video.uploaded.v1` to processing status update.
+4. Decide later whether direct `media-worker` lifecycle outbox is necessary.
 
 Reason:
 
 - `video-service` already writes and publishes `video.uploaded.v1`.
 - The worker can now turn raw uploaded objects into processed outputs in FFmpeg mode.
-- The next gap is making this flow observable and deployable enough for incident/RCA evidence.
-- Consumer, placeholder runner and retry/dead-letter behavior now exist; the next gap is replacing placeholder work with real FFmpeg and output object writes.
+- The next gap is making this flow deployable enough for Kubernetes/GitOps and end-to-end incident/RCA evidence.
 
 ## Update Rule
 
