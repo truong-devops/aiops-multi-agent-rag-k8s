@@ -50,13 +50,14 @@ Public clients should not call `media-worker` directly.
 | `MINIO_REGION` | `us-east-1` | S3 signing region. |
 | `MINIO_USE_SSL` | `false` | Use HTTPS for object storage calls. |
 | `RAW_VIDEO_BUCKET` | `raw-videos` | Raw input bucket. |
-| `PROCESSED_VIDEO_BUCKET` | `processed-videos` | Future processed output bucket. |
-| `THUMBNAIL_BUCKET` | `thumbnails` | Future thumbnail bucket. |
+| `PROCESSED_VIDEO_BUCKET` | `processed-videos` | Processed MP4 output bucket. |
+| `THUMBNAIL_BUCKET` | `thumbnails` | Thumbnail output bucket. |
 | `VIDEO_SERVICE_BASE_URL` | empty | Internal video-service base URL. Required outside local/dev/test and when `RUNNER_ENABLED=true`. |
 | `INTERNAL_API_TOKEN` | empty | Token sent to video-service internal status API. Required outside local/dev/test and when `RUNNER_ENABLED=true`. |
-| `PROCESSING_MODE` | `placeholder` | `placeholder` first, `ffmpeg` later. |
-| `FFMPEG_PATH` | `ffmpeg` | FFmpeg binary path for future FFmpeg mode. |
-| `FFPROBE_PATH` | `ffprobe` | FFprobe binary path for future FFmpeg mode. |
+| `PROCESSING_MODE` | `placeholder` | `placeholder` for local flow checks or `ffmpeg` for real processing. |
+| `FFMPEG_PATH` | `ffmpeg` | FFmpeg binary path for FFmpeg mode. |
+| `FFPROBE_PATH` | `ffprobe` | FFprobe binary path for FFmpeg mode. |
+| `PROCESSING_TIMEOUT` | `30m` | Per-attempt FFmpeg/FFprobe processing timeout. |
 | `REQUEST_BODY_LIMIT_BYTES` | `1048576` | Max HTTP request body size. |
 
 ## Current Implementation
@@ -76,15 +77,17 @@ Implemented now:
   - dead-letter persistence.
 - Kafka consumer for `video.uploaded.v1` with envelope parsing, validation, durable job creation and commit-after-persist behavior.
 - Placeholder runner that claims jobs, verifies the raw object through S3-compatible HEAD, updates `video-service` status to `processing`, then marks the job `succeeded`, `retrying`, or `dead_letter`.
+- FFmpeg processor mode that downloads the raw object from MinIO/S3, extracts metadata with FFprobe, transcodes an MP4 output, generates a JPEG thumbnail, uploads both outputs, and records processing metrics.
 - HTTP client for video-service internal status updates through `X-Internal-Token`.
 - Retry/backoff policy and stable processing error codes.
+- Lifecycle event contract builders for `video.processing_started.v1`, `video.ready.v1`, and `video.processing_failed.v1`; direct worker publishing is deferred while `video-service` remains the canonical lifecycle event producer.
 - Unit tests and skipped-by-default PostgreSQL integration harness.
 
 Still pending:
 
-- Real FFmpeg/FFprobe processing.
-- Processed video and thumbnail upload to MinIO.
-- Outgoing media lifecycle events.
+- Richer queue lag, object storage and upstream latency metrics.
+- Local sample-video smoke test for `PROCESSING_MODE=ffmpeg`.
+- Direct media-worker lifecycle outbox/publisher only if downstream requirements need worker-owned lifecycle events.
 - Redis locks/idempotency cache, if needed after PostgreSQL behavior is stable.
 
 ## Dependencies Dự Kiến

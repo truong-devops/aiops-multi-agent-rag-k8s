@@ -32,7 +32,7 @@ As of 2026-07-03:
 - `[x]` Da consume `video.uploaded.v1` khi `CONSUMER_ENABLED=true`.
 - `[x]` Da co worker loop, retry/backoff va dead-letter.
 - `[x]` Da update video status qua `video-service` khi `RUNNER_ENABLED=true`.
-- `[~]` Da co MinIO raw object metadata check; chua co output upload cho processed/thumbnail.
+- `[x]` Da co MinIO raw object metadata check, raw object download, processed output upload va thumbnail upload.
 - `[x]` Da co processing placeholder.
 - `[~]` Da co metrics/logs cho consumer, runner, retry/dead-letter; chua co FFmpeg-specific metrics.
 
@@ -312,15 +312,15 @@ Done criteria:
 
 ## Phase 6: FFmpeg Processing
 
-- `[ ]` Add `internal/processor` abstraction.
-- `[ ]` Keep placeholder processor for tests/local.
-- `[ ]` Add FFprobe metadata extraction.
-- `[ ]` Add FFmpeg transcode path for MVP output.
-- `[ ]` Add thumbnail generation.
-- `[ ]` Upload processed output and thumbnail to MinIO.
-- `[ ]` Capture duration, dimensions, output size and sanitized stderr excerpt.
-- `[ ]` Enforce command timeout.
-- `[ ]` Add tests around command construction and failure mapping.
+- `[x]` Add `internal/processor` abstraction.
+- `[x]` Keep placeholder processor for tests/local.
+- `[x]` Add FFprobe metadata extraction.
+- `[x]` Add FFmpeg transcode path for MVP output.
+- `[x]` Add thumbnail generation.
+- `[x]` Upload processed output and thumbnail to MinIO.
+- `[x]` Capture duration, dimensions, output size and sanitized stderr excerpt.
+- `[x]` Enforce command timeout.
+- `[x]` Add tests around command construction and failure mapping.
 
 Done criteria:
 
@@ -330,13 +330,20 @@ Done criteria:
 
 ## Phase 7: Outgoing Events And Contracts
 
-- `[ ]` Decide if `media-worker` publishes events directly or only updates `video-service`.
-- `[ ]` If publishing directly, add outbox table and publisher worker.
-- `[ ]` Emit or trigger `video.processing_started.v1`.
-- `[ ]` Emit or trigger `video.ready.v1`.
-- `[ ]` Emit or trigger `video.processing_failed.v1`.
-- `[ ]` Document event payloads in contracts docs.
-- `[ ]` Add tests for event payloads.
+- `[x]` Decide if `media-worker` publishes events directly or only updates `video-service`.
+- `[~]` If publishing directly, add outbox table and publisher worker.
+- `[~]` Emit or trigger `video.processing_started.v1`.
+- `[~]` Emit or trigger `video.ready.v1`.
+- `[~]` Emit or trigger `video.processing_failed.v1`.
+- `[x]` Document event payloads in contracts docs.
+- `[x]` Add tests for event payloads.
+
+Decision:
+
+- For the current product slice, `media-worker` updates processing state through the internal `video-service` status API.
+- `video-service` remains the canonical video lifecycle owner and event producer for downstream services.
+- `media-worker` keeps versioned lifecycle contract builders for `video.processing_started.v1`, `video.ready.v1`, and `video.processing_failed.v1` so a direct publisher/outbox can be added later without inventing payloads under pressure.
+- A direct `media-worker` outbox table and Kafka publisher are deferred until there is a clear downstream need that cannot be handled by `video-service` lifecycle events.
 
 Done criteria:
 
@@ -379,15 +386,16 @@ Done criteria:
 
 Next best engineering task:
 
-1. Implement Phase 6 FFmpeg/FFprobe processing behind the existing processor interface.
-2. Add processed video and thumbnail upload to MinIO.
-3. Implement Phase 7 outgoing lifecycle events or decide that `video-service` is the only lifecycle event producer.
-4. Add local compose or CI wiring for media-worker PostgreSQL integration tests.
+1. Add richer Phase 8 observability: queue lag, job status gauges, MinIO latency/error counters and video-service status update latency.
+2. Add local compose or CI wiring for media-worker PostgreSQL integration tests.
+3. Add a small local sample-video smoke test for `PROCESSING_MODE=ffmpeg`.
+4. Add Kubernetes/GitOps manifests after the local worker flow is stable.
 
 Reason:
 
 - `video-service` already writes and publishes `video.uploaded.v1`.
-- The next product gap is turning uploaded videos into processing jobs.
+- The worker can now turn raw uploaded objects into processed outputs in FFmpeg mode.
+- The next gap is making this flow observable and deployable enough for incident/RCA evidence.
 - Consumer, placeholder runner and retry/dead-letter behavior now exist; the next gap is replacing placeholder work with real FFmpeg and output object writes.
 
 ## Update Rule
