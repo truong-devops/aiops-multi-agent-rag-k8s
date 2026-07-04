@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -17,11 +18,26 @@ import (
 
 type ObjectStore interface {
 	VerifyObject(ctx context.Context, input VerifyObjectInput) (ObjectMetadata, error)
+	DownloadObject(ctx context.Context, input ObjectRef) (io.ReadCloser, error)
+	UploadObject(ctx context.Context, input UploadObjectInput) (ObjectMetadata, error)
 }
 
 type VerifyObjectInput struct {
 	Bucket    string
 	ObjectKey string
+}
+
+type ObjectRef struct {
+	Bucket    string
+	ObjectKey string
+}
+
+type UploadObjectInput struct {
+	Bucket      string
+	ObjectKey   string
+	ContentType string
+	SizeBytes   int64
+	Body        io.Reader
 }
 
 type ObjectMetadata struct {
@@ -81,26 +97,10 @@ func (s *S3ObjectStore) VerifyObject(ctx context.Context, input VerifyObjectInpu
 	if strings.TrimSpace(input.Bucket) == "" || strings.TrimSpace(input.ObjectKey) == "" {
 		return ObjectMetadata{}, domain.ValidationError("bucket and object key are required.")
 	}
-	scheme := "http"
-	if s.useSSL {
-		scheme = "https"
-	}
-	objectPath := "/" + pathEscape(strings.Trim(input.Bucket, "/")) + "/" + pathEscape(strings.TrimLeft(input.ObjectKey, "/"))
-	target := (&url.URL{Scheme: scheme, Host: s.endpoint, Path: objectPath}).String()
-	now := time.Now().UTC()
-	amzDate := now.Format("20060102T150405Z")
-	req, err := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
+	req, err := s.newSignedRequest(ctx, http.MethodHead, input.Bucket, input.ObjectKey, "", nil)
 	if err != nil {
 		return ObjectMetadata{}, err
 	}
-	req.Host = s.endpoint
-	req.Header.Set("X-Amz-Date", amzDate)
-	req.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
-	req.Header.Set("Authorization", s.authorizationHeader(http.MethodHead, objectPath, now, map[string]string{
-		"host":                 s.endpoint,
-		"x-amz-content-sha256": "UNSIGNED-PAYLOAD",
-		"x-amz-date":           amzDate,
-	}))
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return ObjectMetadata{}, domain.NewError(http.StatusServiceUnavailable, domain.CodeMinIOUnavailable, "Object storage is unavailable.")
@@ -123,10 +123,105 @@ func (s *S3ObjectStore) VerifyObject(ctx context.Context, input VerifyObjectInpu
 	}
 }
 
+func (s *S3ObjectStore) DownloadObject(ctx context.Context, input ObjectRef) (io.ReadCloser, error) {
+	if strings.TrimSpace(input.Bucket) == "" || strings.TrimSpace(input.ObjectKey) == "" {
+		return nil, domain.ValidationError("bucket and object key are required.")
+	}
+	req, err := s.newSignedRequest(ctx, http.MethodGet, input.Bucket, input.ObjectKey, "", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, domain.NewError(http.StatusServiceUnavailable, domain.CodeMinIOUnavailable, "Object storage is unavailable.")
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return resp.Body, nil
+	case http.StatusNotFound:
+		_ = resp.Body.Close()
+		return nil, domain.NotFound(domain.CodeRawObjectNotFound, "Raw video object was not found.")
+	default:
+		_ = resp.Body.Close()
+		if resp.StatusCode >= 500 {
+			return nil, domain.NewError(http.StatusServiceUnavailable, domain.CodeMinIOUnavailable, "Object storage download failed.")
+		}
+		return nil, domain.NewError(http.StatusBadGateway, domain.CodeMinIOUnavailable, "Object storage download failed.")
+	}
+}
+
+func (s *S3ObjectStore) UploadObject(ctx context.Context, input UploadObjectInput) (ObjectMetadata, error) {
+	if strings.TrimSpace(input.Bucket) == "" || strings.TrimSpace(input.ObjectKey) == "" || input.Body == nil {
+		return ObjectMetadata{}, domain.ValidationError("bucket, object key and body are required.")
+	}
+	req, err := s.newSignedRequest(ctx, http.MethodPut, input.Bucket, input.ObjectKey, input.ContentType, input.Body)
+	if err != nil {
+		return ObjectMetadata{}, err
+	}
+	if input.SizeBytes > 0 {
+		req.ContentLength = input.SizeBytes
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return ObjectMetadata{}, domain.NewError(http.StatusServiceUnavailable, domain.CodeMinIOUnavailable, "Object storage is unavailable.")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode >= 500 {
+			return ObjectMetadata{}, domain.NewError(http.StatusServiceUnavailable, domain.CodeMinIOUnavailable, "Object storage upload failed.")
+		}
+		return ObjectMetadata{}, domain.NewError(http.StatusBadGateway, domain.CodeMinIOUnavailable, "Object storage upload failed.")
+	}
+	return ObjectMetadata{
+		SizeBytes:   input.SizeBytes,
+		ContentType: strings.TrimSpace(input.ContentType),
+		ETag:        strings.Trim(resp.Header.Get("ETag"), `"`),
+	}, nil
+}
+
 type NoopObjectStore struct{}
 
 func (NoopObjectStore) VerifyObject(context.Context, VerifyObjectInput) (ObjectMetadata, error) {
 	return ObjectMetadata{}, nil
+}
+
+func (NoopObjectStore) DownloadObject(context.Context, ObjectRef) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (NoopObjectStore) UploadObject(context.Context, UploadObjectInput) (ObjectMetadata, error) {
+	return ObjectMetadata{}, nil
+}
+
+func (s *S3ObjectStore) newSignedRequest(ctx context.Context, method string, bucket string, objectKey string, contentType string, body io.Reader) (*http.Request, error) {
+	scheme := "http"
+	if s.useSSL {
+		scheme = "https"
+	}
+	objectPath := "/" + pathEscape(strings.Trim(bucket, "/")) + "/" + pathEscape(strings.TrimLeft(objectKey, "/"))
+	target := (&url.URL{Scheme: scheme, Host: s.endpoint, Path: objectPath}).String()
+	now := time.Now().UTC()
+	amzDate := now.Format("20060102T150405Z")
+	req, err := http.NewRequestWithContext(ctx, method, target, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Host = s.endpoint
+	req.Header.Set("X-Amz-Date", amzDate)
+	req.Header.Set("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+	if strings.TrimSpace(contentType) != "" {
+		req.Header.Set("Content-Type", strings.TrimSpace(contentType))
+	}
+	headers := map[string]string{
+		"host":                 s.endpoint,
+		"x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+		"x-amz-date":           amzDate,
+	}
+	if contentType != "" {
+		headers["content-type"] = strings.TrimSpace(contentType)
+	}
+	req.Header.Set("Authorization", s.authorizationHeader(method, objectPath, now, headers))
+	return req, nil
 }
 
 func (s *S3ObjectStore) authorizationHeader(method string, objectPath string, now time.Time, headers map[string]string) string {

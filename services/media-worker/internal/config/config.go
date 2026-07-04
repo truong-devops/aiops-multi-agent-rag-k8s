@@ -38,6 +38,7 @@ type Config struct {
 	ProcessingMode        string
 	FFmpegPath            string
 	FFprobePath           string
+	ProcessingTimeout     time.Duration
 	RequestBodyLimitBytes int64
 }
 
@@ -71,6 +72,7 @@ func Load() (Config, error) {
 		ProcessingMode:        getenv("PROCESSING_MODE", "placeholder"),
 		FFmpegPath:            getenv("FFMPEG_PATH", "ffmpeg"),
 		FFprobePath:           getenv("FFPROBE_PATH", "ffprobe"),
+		ProcessingTimeout:     parseDuration(getenv("PROCESSING_TIMEOUT", "30m"), 30*time.Minute),
 		RequestBodyLimitBytes: parseInt64(getenv("REQUEST_BODY_LIMIT_BYTES", "1048576"), 1048576),
 	}
 	if err := cfg.Validate(); err != nil {
@@ -103,6 +105,9 @@ func (c Config) Validate() error {
 	}
 	if !validProcessingMode(c.ProcessingMode) {
 		return fmt.Errorf("PROCESSING_MODE must be placeholder or ffmpeg")
+	}
+	if c.ProcessingTimeout <= 0 {
+		return fmt.Errorf("PROCESSING_TIMEOUT must be positive")
 	}
 	if c.ConsumerEnabled {
 		if len(c.KafkaBrokers) == 0 {

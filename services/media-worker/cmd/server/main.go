@@ -51,16 +51,18 @@ func main() {
 		logger.Error("failed to initialize video status client", "service", serviceName, "error", err)
 		os.Exit(1)
 	}
-	placeholder := processor.NewPlaceholderProcessor(processor.PlaceholderConfig{
-		ObjectStore: objectStore,
-	})
+	videoProcessor, err := newProcessor(cfg, objectStore)
+	if err != nil {
+		logger.Error("failed to initialize processor", "service", serviceName, "error", err)
+		os.Exit(1)
+	}
 	processingService := service.NewProcessingService(store, service.Options{
 		RawBucket:    cfg.RawVideoBucket,
 		MaxAttempts:  cfg.MaxAttempts,
 		WorkerID:     cfg.WorkerID,
 		LeaseTTL:     cfg.JobLeaseTTL,
 		BatchSize:    cfg.JobBatchSize,
-		Processor:    placeholder,
+		Processor:    videoProcessor,
 		StatusClient: statusClient,
 		Metrics:      metrics,
 		Logger:       logger,
@@ -145,6 +147,22 @@ func newObjectStore(cfg config.Config) (storage.ObjectStore, error) {
 		Region:    cfg.MinIORegion,
 		UseSSL:    cfg.MinIOUseSSL,
 	})
+}
+
+func newProcessor(cfg config.Config, objectStore storage.ObjectStore) (processor.Processor, error) {
+	if cfg.ProcessingMode == "ffmpeg" {
+		return processor.NewFFmpegProcessor(processor.FFmpegConfig{
+			ObjectStore:     objectStore,
+			ProcessedBucket: cfg.ProcessedVideoBucket,
+			ThumbnailBucket: cfg.ThumbnailBucket,
+			FFmpegPath:      cfg.FFmpegPath,
+			FFprobePath:     cfg.FFprobePath,
+			Timeout:         cfg.ProcessingTimeout,
+		})
+	}
+	return processor.NewPlaceholderProcessor(processor.PlaceholderConfig{
+		ObjectStore: objectStore,
+	}), nil
 }
 
 func newStatusClient(cfg config.Config) (client.VideoStatusClient, error) {

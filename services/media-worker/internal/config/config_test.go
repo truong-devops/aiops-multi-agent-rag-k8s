@@ -82,6 +82,7 @@ func validConfig(environment string) Config {
 		ProcessingMode:        "placeholder",
 		FFmpegPath:            "ffmpeg",
 		FFprobePath:           "ffprobe",
+		ProcessingTimeout:     30 * time.Minute,
 		RequestBodyLimitBytes: 1048576,
 	}
 }
