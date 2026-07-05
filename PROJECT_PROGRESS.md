@@ -37,7 +37,8 @@ As of 2026-07-04:
 - `api-gateway` now has route proxying, request/correlation IDs, CORS, body limits, upstream timeout, JWT verification through identity JWKS, trusted user-context forwarding, internal header stripping, JSON gateway/auth errors, readiness checks, and basic Prometheus text metrics.
 - `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation with optional MinIO/S3 object metadata verification, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, local/CI DB integration workflow, idempotent upload intent creation, MinIO/S3 presigned upload URLs, owner/internal authorization, pending outbox writes for `video.uploaded.v1`, and a Redpanda/Kafka outbox publisher worker.
 - `media-worker` now has a production-shaped scaffold, config validation, health/readiness/metrics, domain models for processing jobs/attempts/dead letters, PostgreSQL schema and repository, local in-memory test store, Kafka consumer for `video.uploaded.v1`, placeholder processing runner, FFmpeg/FFprobe processing mode, MinIO raw download/output upload, thumbnail generation, video-service internal status update client, retry/backoff, dead-letter behavior, lifecycle event contract builders, richer operational metrics/logging, a PostgreSQL integration-test target, and an FFmpeg smoke test.
-- Several product services beyond `identity-service`, `api-gateway`, `video-service`, and the first `media-worker` foundation are still mostly skeletons with health, readiness, and metrics placeholders.
+- `feed-social-service` now has a production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, local in-memory fallback, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert, stable feed list repository query, repository tests, and a skipped-by-default PostgreSQL integration harness. It still needs `GET /v1/feed`, `video.ready.v1` ingestion, and social APIs.
+- `live-service` is still mostly a skeleton with health, readiness, and metrics placeholders.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
 
 ## Decisions Made
@@ -58,7 +59,22 @@ As of 2026-07-04:
 
 ## Work Log
 
+### 2026-07-05
+
+- Implemented `feed-social-service` Phase 1 and Phase 2 from `docs/development/feed-social-service-implementation-plan.md`.
+- Replaced the placeholder server with config loading, JSON structured logs, body limit, request/correlation middleware, graceful shutdown, readiness through store ping, metrics middleware, PostgreSQL wiring, and explicit local in-memory fallback.
+- Added feed domain models/errors for feed items, counters and inbox idempotency; added PostgreSQL migration `001_feed_schema.sql` for `feed_items`, `video_social_counters`, and `inbox_events`.
+- Added repository interfaces plus in-memory, PostgreSQL and instrumented stores with idempotent ready-video upsert and stable feed listing by `ready_at DESC, video_id DESC`.
+- Added `github.com/jackc/pgx/v5 v5.8.0` to `services/feed-social-service` and updated dependency/version docs.
+- Updated `services/feed-social-service/README.md`, `docs/development/feed-social-service-implementation-plan.md`, and `docs/development/implementation-plan.md`.
+- Verified with `go test ./...` in `services/feed-social-service`.
+- Notes for next session: implement Phase 3 `GET /v1/feed`, then choose Phase 4 ingestion path for `video.ready.v1` or a controlled internal MVP ingestion route.
+
 ### 2026-07-04
+
+- Added `docs/development/feed-social-service-implementation-plan.md` as the focused roadmap/checklist for building the ready-video feed and basic social service.
+- Linked the feed-social plan from `docs/development/README.md` and the high-level implementation plan.
+- Notes for next session: start `feed-social-service` Phase 1 scaffold, then PostgreSQL feed read model and `GET /v1/feed`.
 
 - Implemented `media-worker` Phase 8 observability work from `docs/development/media-worker-implementation-plan.md`.
 - Added job status gauges, runnable queue depth/oldest-age gauges, attempt outcome/error-code counters, observed `video.uploaded.v1` event age counters, database operation metrics, MinIO dependency metrics, and video-service status update dependency metrics.
@@ -218,7 +234,7 @@ Recommended engineering order:
 2. Add Redis-backed rate limiting to `api-gateway` when the edge/auth foundation needs another hardening pass.
 3. Add Kubernetes/GitOps manifests and resource requests/limits for `video-service` and `media-worker`.
 4. Add a full compose smoke test for the video upload-to-processing flow.
-5. Implement a minimal ready-video feed in `feed-social-service`.
+5. Implement `feed-social-service` Phase 3 `GET /v1/feed`, then Phase 4 ready-video ingestion.
 6. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
 7. Define incident fixtures, runbooks, ground truth, and evaluation metrics.
 8. Implement `aiops-service` evidence schema, collectors, RAG pipeline, agents, RCA synthesis, and evaluator.

@@ -49,7 +49,7 @@ Các Go service hiện tại đang dùng Go `1.24` với toolchain `go1.24.13`. 
 | `services/api-gateway` | Go `1.24`, toolchain `go1.24.13` | none |
 | `services/identity-service` | Go `1.24`, toolchain `go1.24.13` | `github.com/jackc/pgx/v5 v5.8.0`, `github.com/redis/go-redis/v9 v9.20.1` |
 | `services/video-service` | Go `1.24`, toolchain `go1.24.13` | `github.com/jackc/pgx/v5 v5.8.0`, `github.com/segmentio/kafka-go v0.4.51` |
-| `services/feed-social-service` | Go `1.24`, toolchain `go1.24.13` | none |
+| `services/feed-social-service` | Go `1.24`, toolchain `go1.24.13` | `github.com/jackc/pgx/v5 v5.8.0` |
 | `services/live-service` | Go `1.24`, toolchain `go1.24.13` | none |
 | `services/media-worker` | Go `1.24`, toolchain `go1.24.13` | `github.com/jackc/pgx/v5 v5.8.0`, `github.com/segmentio/kafka-go v0.4.51` |
 

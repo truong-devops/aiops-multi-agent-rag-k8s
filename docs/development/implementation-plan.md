@@ -10,12 +10,14 @@ Legend:
 
 ## Current Snapshot
 
-As of 2026-07-03:
+As of 2026-07-05:
 
 - `identity-service`: da co auth/profile/JWT/OAuth/JWKS/PostgreSQL/Redis-facing design o muc tot hon cac service khac.
 - `api-gateway`: da co routing, request/correlation ID, JWT verify qua JWKS, trusted user-context forwarding, readiness va basic metrics.
 - `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow, upload idempotency, MinIO/S3 presigned upload URL, optional object metadata verification, owner/internal authorization va Redpanda/Kafka outbox publisher cho `video.uploaded.v1`.
-- `media-worker`: da co production-shaped scaffold, PostgreSQL job persistence, `video.uploaded.v1` consumer, placeholder runner, video-service status update client, retry/backoff, dead-letter, FFmpeg/FFprobe processing mode, MinIO raw download, processed output upload, thumbnail upload, lifecycle event contract builders, richer operational metrics/logging, PostgreSQL integration test target va FFmpeg smoke test. `feed-social-service`, `live-service`: van chu yeu la skeleton.
+- `media-worker`: da co production-shaped scaffold, PostgreSQL job persistence, `video.uploaded.v1` consumer, placeholder runner, video-service status update client, retry/backoff, dead-letter, FFmpeg/FFprobe processing mode, MinIO raw download, processed output upload, thumbnail upload, lifecycle event contract builders, richer operational metrics/logging, PostgreSQL integration test target va FFmpeg smoke test.
+- `feed-social-service`: da co production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, in-memory local store, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert va repository tests; chua co `GET /v1/feed` hoac `video.ready.v1` ingestion.
+- `live-service`: van chu yeu la skeleton.
 - `aiops-service`: da co package layout, chua co RCA pipeline that.
 
 ## Milestone 0: Project Rules And Handoff
@@ -102,6 +104,10 @@ Done criteria:
 
 ## Milestone 4: Feed And Basic Social
 
+Detailed service checklist: `docs/development/feed-social-service-implementation-plan.md`.
+
+- `[x]` Add feed-social production-shaped scaffold.
+- `[x]` Add PostgreSQL feed read model foundation.
 - `[ ]` Implement minimal feed API for ready videos.
 - `[ ]` Consume `video.ready.v1` or query via controlled API for MVP.
 - `[ ]` Add likes.
