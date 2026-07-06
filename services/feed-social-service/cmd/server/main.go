@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/config"
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/event"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/handler"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/observability"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/repository"
@@ -38,12 +39,18 @@ func main() {
 	defer closeStore()
 
 	feedService := service.NewFeedService(store, service.Options{
-		Metrics: metrics,
-		Logger:  logger,
+		Metrics:      metrics,
+		Logger:       logger,
+		DefaultLimit: cfg.FeedDefaultLimit,
+		MaxLimit:     cfg.FeedMaxLimit,
 	})
+	consumerCtx, stopConsumer := context.WithCancel(context.Background())
+	closeConsumer := startReadyConsumer(consumerCtx, cfg, feedService, logger, metrics)
+	defer closeConsumer()
+	defer stopConsumer()
 
 	mux := http.NewServeMux()
-	handler.New(feedService).RegisterRoutes(mux, metrics.Handler())
+	handler.New(feedService, handler.Options{InternalAPIToken: cfg.InternalAPIToken}).RegisterRoutes(mux, metrics.Handler())
 
 	var app http.Handler = mux
 	app = observability.BodyLimitMiddleware(cfg.RequestBodyLimitBytes, app)
@@ -72,6 +79,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
+	stopConsumer()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
@@ -98,4 +106,29 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger, metr
 
 	logger.Warn("using in-memory feed store; this is only suitable for local development", "service", serviceName, "environment", cfg.Environment)
 	return repository.NewInstrumentedStore(repository.NewMemoryStore(), metrics), func() {}, nil
+}
+
+func startReadyConsumer(ctx context.Context, cfg config.Config, feedService *service.FeedService, logger *slog.Logger, metrics *observability.Metrics) func() {
+	if !cfg.ConsumerEnabled {
+		logger.Info("ready event consumer disabled", "service", serviceName, "environment", cfg.Environment)
+		return func() {}
+	}
+	consumer := event.NewKafkaConsumer(event.KafkaConsumerConfig{
+		Brokers: cfg.KafkaBrokers,
+		Topic:   cfg.VideoEventsTopic,
+		GroupID: cfg.ConsumerGroup,
+	})
+	worker := event.NewReadyConsumerWorker(event.ReadyConsumerConfig{
+		Consumer:    consumer,
+		Service:     feedService,
+		Logger:      logger,
+		Metrics:     metrics,
+		Environment: cfg.Environment,
+	})
+	go worker.Run(ctx)
+	return func() {
+		if err := worker.Close(); err != nil {
+			logger.Error("failed to close ready event consumer", "service", serviceName, "error", err)
+		}
+	}
 }

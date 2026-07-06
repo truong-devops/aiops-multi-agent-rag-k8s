@@ -21,18 +21,18 @@ Service nay phuc vu hai muc tieu:
 
 ## Current Snapshot
 
-As of 2026-07-05:
+As of 2026-07-06:
 
 - `[x]` Da co Go module skeleton.
 - `[x]` Da co `cmd/server/main.go` production-shaped voi config loading, structured logging, graceful shutdown, body limit, request/correlation middleware va store wiring.
 - `[x]` Da co folder layout theo huong production: `internal/config`, `internal/domain`, `internal/event`, `internal/handler`, `internal/observability`, `internal/repository`, `internal/service`, `migrations`, `tests`.
 - `[x]` Da co config loader/validation cho runtime scaffold va feed limit baseline.
 - `[~]` Da co domain model cho feed item, social counters va inbox idempotency; like/comment/follow domain se lam o cac phase social sau.
-- `[~]` Da co PostgreSQL implementation cho feed read model; MongoDB/Redis chua them vi chua can cho MVP feed durable.
-- `[ ]` Chua co API `GET /v1/feed`.
-- `[ ]` Chua co ingestion tu `video.ready.v1` hoac controlled video-service API.
+- `[x]` Da co PostgreSQL implementation cho feed read model; MongoDB/Redis chua them vi chua can cho MVP feed durable.
+- `[x]` Da co API `GET /v1/feed` voi limit cap, cursor pagination va response envelope.
+- `[x]` Da co ingestion tu `video.ready.v1` qua Kafka/Redpanda consumer va fallback `POST /v1/internal/feed-items` co `X-Internal-Token`.
 - `[ ]` Chua co likes/comments/follows.
-- `[~]` Da co metrics/logs scaffold cho HTTP, DB va feed operations; ingestion/cache/social metrics se them theo cac phase sau.
+- `[~]` Da co metrics/logs scaffold cho HTTP, DB, feed operations, item count va event age; cache/social metrics se them theo cac phase sau.
 
 ## Boundary
 
@@ -95,7 +95,7 @@ Do not build recommendation, search, moderation, notification or personalized ra
 
 Incoming lifecycle events:
 
-- `[~]` `video.ready.v1`
+- `[x]` `video.ready.v1`
 - `[ ]` `video.deleted.v1` or `video.visibility_changed.v1` later if video removal/visibility changes need feed updates.
 
 Expected `video.ready.v1` envelope:
@@ -294,13 +294,13 @@ Required or planned env vars:
 - `[ ]` `MONGODB_URI`
 - `[ ]` `MONGODB_DATABASE`
 - `[ ]` `REDIS_URL`
-- `[ ]` `KAFKA_BROKERS`
-- `[ ]` `VIDEO_EVENTS_TOPIC`
+- `[x]` `KAFKA_BROKERS`
+- `[x]` `VIDEO_EVENTS_TOPIC`
 - `[ ]` `SOCIAL_EVENTS_TOPIC`
-- `[ ]` `CONSUMER_GROUP`
-- `[ ]` `CONSUMER_ENABLED`
+- `[x]` `CONSUMER_GROUP`
+- `[x]` `CONSUMER_ENABLED`
 - `[ ]` `VIDEO_SERVICE_BASE_URL`
-- `[ ]` `INTERNAL_API_TOKEN`
+- `[x]` `INTERNAL_API_TOKEN`
 - `[x]` `REQUEST_BODY_LIMIT_BYTES`
 - `[x]` `FEED_DEFAULT_LIMIT`
 - `[x]` `FEED_MAX_LIMIT`
@@ -352,12 +352,12 @@ Done criteria:
 
 ## Phase 3: Minimal Feed API
 
-- `[ ]` Add handler for `GET /v1/feed`.
-- `[ ]` Add cursor/limit parsing and validation.
-- `[ ]` Add service use case for list feed.
-- `[ ]` Add JSON response envelope with `data`, `page`, `request_id`.
-- `[ ]` Add route not found and method not allowed errors.
-- `[ ]` Add tests for empty feed, populated feed, limit cap and cursor behavior.
+- `[x]` Add handler for `GET /v1/feed`.
+- `[x]` Add cursor/limit parsing and validation.
+- `[x]` Add service use case for list feed.
+- `[x]` Add JSON response envelope with `data`, `page`, `request_id`.
+- `[x]` Add route not found and method not allowed errors.
+- `[x]` Add tests for empty feed, populated feed, limit cap and cursor behavior.
 
 Done criteria:
 
@@ -369,20 +369,20 @@ Done criteria:
 
 Preferred path:
 
-- `[ ]` Consume `video.ready.v1` from Redpanda/Kafka.
-- `[ ]` Parse and validate event envelope.
-- `[ ]` Validate required feed payload fields.
-- `[ ]` Insert `inbox_events` record by `event_id`.
-- `[ ]` Upsert feed item transactionally/idempotently.
-- `[ ]` Commit Kafka offset only after durable feed update.
-- `[ ]` Add metrics for consumed, duplicate, invalid, failed and event age.
-- `[ ]` Add tests with fake consumer/event handler.
+- `[x]` Consume `video.ready.v1` from Redpanda/Kafka.
+- `[x]` Parse and validate event envelope.
+- `[x]` Validate required feed payload fields.
+- `[x]` Insert `inbox_events` record by `event_id`.
+- `[x]` Upsert feed item transactionally/idempotently.
+- `[x]` Commit Kafka offset only after durable feed update.
+- `[x]` Add metrics for consumed, duplicate, invalid, failed and event age.
+- `[x]` Add tests with fake consumer/event handler.
 
 Fallback path if lifecycle event is not available yet:
 
-- `[ ]` Add internal ingestion API guarded by `X-Internal-Token`.
+- `[x]` Add internal ingestion API guarded by `X-Internal-Token`.
 - `[ ]` Or add controlled video-service API client for ready videos without direct DB access.
-- `[ ]` Document which fallback is active and when to remove it.
+- `[x]` Document which fallback is active and when to remove it.
 
 Done criteria:
 
@@ -460,8 +460,8 @@ Done criteria:
 ## Phase 9: Observability And Incident Evidence
 
 - `[~]` Add HTTP request counters/duration by method/path/status.
-- `[ ]` Add feed list latency and result count metrics.
-- `[ ]` Add ingestion event age and failure metrics.
+- `[~]` Add feed list latency and result count metrics.
+- `[x]` Add ingestion event age and failure metrics.
 - `[x]` Add DB operation latency/error metrics.
 - `[ ]` Add Redis cache metrics when cache exists.
 - `[ ]` Add MongoDB operation metrics when comments/read model use MongoDB.
@@ -492,9 +492,9 @@ Done criteria:
 
 Next best engineering task:
 
-1. Implement Phase 3 `GET /v1/feed`.
-2. Choose Phase 4 ingestion path: consume `video.ready.v1` if available, otherwise add controlled internal ingestion for MVP.
-3. Add Phase 5 likes and durable counters.
+1. Add Phase 5 likes and durable counters.
+2. Add Phase 6 comments.
+3. Add Phase 7 follows.
 4. Add cache only after durable feed/social behavior is stable.
 
 Reason:

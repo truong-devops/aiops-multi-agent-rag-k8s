@@ -3,13 +3,15 @@ package domain
 import "net/http"
 
 const (
-	CodeValidationError      = "VALIDATION_ERROR"
-	CodeFeedItemNotFound     = "FEED_ITEM_NOT_FOUND"
-	CodeInvalidFeedItemState = "INVALID_FEED_ITEM_STATE"
-	CodeServiceNotReady      = "SERVICE_NOT_READY"
-	CodeRouteNotFound        = "ROUTE_NOT_FOUND"
-	CodeMethodNotAllowed     = "METHOD_NOT_ALLOWED"
-	CodeInternal             = "INTERNAL_ERROR"
+	CodeValidationError        = "VALIDATION_ERROR"
+	CodeFeedItemNotFound       = "FEED_ITEM_NOT_FOUND"
+	CodeInvalidFeedItemState   = "INVALID_FEED_ITEM_STATE"
+	CodeServiceNotReady        = "SERVICE_NOT_READY"
+	CodeUnauthorized           = "UNAUTHORIZED"
+	CodeInternalAPIUnavailable = "INTERNAL_API_UNAVAILABLE"
+	CodeRouteNotFound          = "ROUTE_NOT_FOUND"
+	CodeMethodNotAllowed       = "METHOD_NOT_ALLOWED"
+	CodeInternal               = "INTERNAL_ERROR"
 )
 
 type AppError struct {

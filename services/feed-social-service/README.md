@@ -25,13 +25,14 @@ Da co:
 - Migration `migrations/001_feed_schema.sql` cho `feed_items`, `video_social_counters`, `inbox_events`.
 - Idempotent ready-video feed item upsert theo `event_id`.
 - Feed list repository query theo `ready_at DESC, video_id DESC`.
+- `GET /v1/feed` voi limit cap, cursor pagination va response envelope.
+- Kafka/Redpanda consumer cho `video.ready.v1`, chi chay khi `CONSUMER_ENABLED=true`.
+- Controlled internal ingestion API `POST /v1/internal/feed-items` duoc bao ve bang `X-Internal-Token`.
+- Metrics cho feed operations, item count va event age.
 - Unit tests va skipped-by-default PostgreSQL integration harness.
 
 Chua co:
 
-- `GET /v1/feed`.
-- Kafka/Redpanda consumer cho `video.ready.v1`.
-- Controlled internal ingestion API.
 - Likes, comments, follows.
 - Redis cache va MongoDB comments/read model.
 
@@ -42,10 +43,11 @@ Current direct service routes:
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`
+- `GET /v1/feed?limit=&cursor=`
+- `POST /v1/internal/feed-items`
 
 Planned direct service routes:
 
-- `GET /v1/feed?limit=&cursor=`
 - `GET /v1/videos/{video_id}/social`
 - `PUT /v1/videos/{video_id}/like`
 - `DELETE /v1/videos/{video_id}/like`
@@ -65,18 +67,18 @@ Public clients should call through `api-gateway` under `/api/v1/*`.
 | `ENVIRONMENT` | `local` | yes | Non-local environments require `DATABASE_URL`. |
 | `LOG_LEVEL` | `info` | no | Supports `debug`, `info`, `warn`, `error`. |
 | `DATABASE_URL` | empty | non-local | Enables PostgreSQL store when set. Local empty value uses in-memory store. |
+| `KAFKA_BROKERS` | empty | when consumer enabled | Comma-separated Redpanda/Kafka brokers. |
+| `VIDEO_EVENTS_TOPIC` | `video-events` | when consumer enabled | Topic that carries `video.ready.v1`. |
+| `CONSUMER_GROUP` | `feed-social-service` | when consumer enabled | Kafka consumer group. |
+| `CONSUMER_ENABLED` | `false` | no | Enables ready-video event consumer. |
+| `INTERNAL_API_TOKEN` | empty | for internal ingestion | Required by `POST /v1/internal/feed-items`. |
 | `REQUEST_BODY_LIMIT_BYTES` | `1048576` | no | Request body cap for future write APIs. |
-| `FEED_DEFAULT_LIMIT` | `20` | no | Baseline for future feed API. |
-| `FEED_MAX_LIMIT` | `50` | no | Baseline cap for future feed API. |
+| `FEED_DEFAULT_LIMIT` | `20` | no | Default page size for feed API. |
+| `FEED_MAX_LIMIT` | `50` | no | Maximum page size for feed API. |
 
 Planned env vars for later phases:
 
-- `KAFKA_BROKERS`
-- `VIDEO_EVENTS_TOPIC`
 - `SOCIAL_EVENTS_TOPIC`
-- `CONSUMER_GROUP`
-- `CONSUMER_ENABLED`
-- `INTERNAL_API_TOKEN`
 - `REDIS_URL`
 - `MONGODB_URI`
 - `MONGODB_DATABASE`
@@ -106,6 +108,37 @@ Run locally with PostgreSQL:
 ```bash
 DATABASE_URL='postgres://user:password@localhost:5432/feed_social?sslmode=disable' go run ./cmd/server
 ```
+
+Run with ready-video consumer:
+
+```bash
+DATABASE_URL='postgres://user:password@localhost:5432/feed_social?sslmode=disable' \
+KAFKA_BROKERS='localhost:9092' \
+VIDEO_EVENTS_TOPIC='video-events' \
+CONSUMER_GROUP='feed-social-service' \
+CONSUMER_ENABLED=true \
+go run ./cmd/server
+```
+
+Seed a ready feed item through the controlled local/dev ingestion API after starting the service with `INTERNAL_API_TOKEN=local-secret`:
+
+```bash
+curl -X POST http://localhost:8080/v1/internal/feed-items \
+  -H 'Content-Type: application/json' \
+  -H 'X-Internal-Token: local-secret' \
+  -d '{
+    "event_id": "evt_local_1",
+    "video_id": "vid_123",
+    "owner_id": "usr_123",
+    "title": "Ready video",
+    "thumbnail_object_key": "thumbnails/vid_123/poster.jpg",
+    "playback_object_key": "processed/vid_123/source.mp4",
+    "duration_ms": 12340,
+    "ready_at": "2026-07-06T10:00:00Z"
+  }'
+```
+
+`POST /v1/internal/feed-items` is a controlled local/dev and MVP fallback. Prefer `video.ready.v1` consumption for real event-driven flow, and remove or restrict the fallback once the upload-to-processing-to-feed path is fully covered by events in deployment.
 
 ## Incident Scenarios
 

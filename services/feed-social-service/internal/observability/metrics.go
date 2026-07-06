@@ -16,6 +16,9 @@ type Metrics struct {
 	dbOperations   map[operationMetricKey]uint64
 	dbLatency      map[operationMetricKey]time.Duration
 	feedOperations map[operationMetricKey]uint64
+	feedResults    map[operationMetricKey]uint64
+	eventAge       map[operationMetricKey]time.Duration
+	eventAgeCount  map[operationMetricKey]uint64
 }
 
 type httpMetricKey struct {
@@ -35,6 +38,9 @@ func NewMetrics() *Metrics {
 		dbOperations:   map[operationMetricKey]uint64{},
 		dbLatency:      map[operationMetricKey]time.Duration{},
 		feedOperations: map[operationMetricKey]uint64{},
+		feedResults:    map[operationMetricKey]uint64{},
+		eventAge:       map[operationMetricKey]time.Duration{},
+		eventAgeCount:  map[operationMetricKey]uint64{},
 	}
 }
 
@@ -70,6 +76,27 @@ func (m *Metrics) RecordFeedOperation(operation string, outcome string) {
 	m.feedOperations[key]++
 }
 
+func (m *Metrics) RecordFeedResult(operation string, outcome string, count int) {
+	if count < 0 {
+		count = 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := operationMetricKey{Operation: normalizeLabel(operation, "unknown"), Outcome: normalizeLabel(outcome, "unknown")}
+	m.feedResults[key] += uint64(count)
+}
+
+func (m *Metrics) RecordEventAge(source string, outcome string, age time.Duration) {
+	if age < 0 {
+		age = 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := operationMetricKey{Operation: normalizeLabel(source, "unknown"), Outcome: normalizeLabel(outcome, "unknown")}
+	m.eventAge[key] += age
+	m.eventAgeCount[key]++
+}
+
 func (m *Metrics) Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -97,6 +124,18 @@ func (m *Metrics) writePrometheus(w http.ResponseWriter) {
 	feedOperations := make(map[operationMetricKey]uint64, len(m.feedOperations))
 	for _, key := range feedKeys {
 		feedOperations[key] = m.feedOperations[key]
+	}
+	resultKeys := sortedOperationKeys(m.feedResults)
+	feedResults := make(map[operationMetricKey]uint64, len(m.feedResults))
+	for _, key := range resultKeys {
+		feedResults[key] = m.feedResults[key]
+	}
+	eventAgeKeys := sortedOperationKeys(m.eventAgeCount)
+	eventAge := make(map[operationMetricKey]time.Duration, len(m.eventAge))
+	eventAgeCount := make(map[operationMetricKey]uint64, len(m.eventAgeCount))
+	for _, key := range eventAgeKeys {
+		eventAge[key] = m.eventAge[key]
+		eventAgeCount[key] = m.eventAgeCount[key]
 	}
 	m.mu.Unlock()
 
@@ -128,6 +167,24 @@ func (m *Metrics) writePrometheus(w http.ResponseWriter) {
 	_, _ = fmt.Fprintln(w, "# TYPE feed_social_operations_total counter")
 	for _, key := range feedKeys {
 		_, _ = fmt.Fprintf(w, "feed_social_operations_total{operation=%q,outcome=%q} %d\n", key.Operation, key.Outcome, feedOperations[key])
+	}
+
+	_, _ = fmt.Fprintln(w, "# HELP feed_social_items_returned_total Total feed items returned by operation and outcome.")
+	_, _ = fmt.Fprintln(w, "# TYPE feed_social_items_returned_total counter")
+	for _, key := range resultKeys {
+		_, _ = fmt.Fprintf(w, "feed_social_items_returned_total{operation=%q,outcome=%q} %d\n", key.Operation, key.Outcome, feedResults[key])
+	}
+
+	_, _ = fmt.Fprintln(w, "# HELP feed_social_event_age_seconds_total Total observed event age by source and outcome.")
+	_, _ = fmt.Fprintln(w, "# TYPE feed_social_event_age_seconds_total counter")
+	for _, key := range eventAgeKeys {
+		_, _ = fmt.Fprintf(w, "feed_social_event_age_seconds_total{source=%q,outcome=%q} %.6f\n", key.Operation, key.Outcome, eventAge[key].Seconds())
+	}
+
+	_, _ = fmt.Fprintln(w, "# HELP feed_social_event_age_observations_total Event age observations by source and outcome.")
+	_, _ = fmt.Fprintln(w, "# TYPE feed_social_event_age_observations_total counter")
+	for _, key := range eventAgeKeys {
+		_, _ = fmt.Fprintf(w, "feed_social_event_age_observations_total{source=%q,outcome=%q} %d\n", key.Operation, key.Outcome, eventAgeCount[key])
 	}
 }
 

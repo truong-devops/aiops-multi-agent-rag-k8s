@@ -13,6 +13,11 @@ type Config struct {
 	Environment           string
 	LogLevel              slog.Level
 	DatabaseURL           string
+	KafkaBrokers          []string
+	VideoEventsTopic      string
+	ConsumerGroup         string
+	ConsumerEnabled       bool
+	InternalAPIToken      string
 	RequestBodyLimitBytes int64
 	FeedDefaultLimit      int
 	FeedMaxLimit          int
@@ -24,6 +29,11 @@ func Load() (Config, error) {
 		Environment:           getenv("ENVIRONMENT", "local"),
 		LogLevel:              parseLogLevel(getenv("LOG_LEVEL", "info")),
 		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		KafkaBrokers:          parseCSV(os.Getenv("KAFKA_BROKERS")),
+		VideoEventsTopic:      getenv("VIDEO_EVENTS_TOPIC", "video-events"),
+		ConsumerGroup:         getenv("CONSUMER_GROUP", "feed-social-service"),
+		ConsumerEnabled:       parseBool(getenv("CONSUMER_ENABLED", "false")),
+		InternalAPIToken:      strings.TrimSpace(os.Getenv("INTERNAL_API_TOKEN")),
 		RequestBodyLimitBytes: parseInt64(getenv("REQUEST_BODY_LIMIT_BYTES", "1048576"), 1048576),
 		FeedDefaultLimit:      parseInt(getenv("FEED_DEFAULT_LIMIT", "20"), 20),
 		FeedMaxLimit:          parseInt(getenv("FEED_MAX_LIMIT", "50"), 50),
@@ -52,6 +62,17 @@ func (c Config) Validate() error {
 	}
 	if !c.IsLocal() && strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("DATABASE_URL is required when ENVIRONMENT=%s", c.Environment)
+	}
+	if c.ConsumerEnabled {
+		if len(c.KafkaBrokers) == 0 {
+			return fmt.Errorf("KAFKA_BROKERS is required when CONSUMER_ENABLED=true")
+		}
+		if strings.TrimSpace(c.VideoEventsTopic) == "" {
+			return fmt.Errorf("VIDEO_EVENTS_TOPIC is required when CONSUMER_ENABLED=true")
+		}
+		if strings.TrimSpace(c.ConsumerGroup) == "" {
+			return fmt.Errorf("CONSUMER_GROUP is required when CONSUMER_ENABLED=true")
+		}
 	}
 	return nil
 }
@@ -96,6 +117,27 @@ func parseInt64(value string, fallback int64) int64 {
 		return fallback
 	}
 	return parsed
+}
+
+func parseBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func getenv(key string, fallback string) string {
