@@ -36,6 +36,61 @@ func TestListFeedRejectsInvalidCursor(t *testing.T) {
 	}
 }
 
+func TestLikeVideoRequiresActorAndIsIdempotent(t *testing.T) {
+	svc := NewFeedService(repository.NewMemoryStore(), Options{DefaultLimit: 2, MaxLimit: 2})
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	upsertReady(t, svc, readyInput("evt_like_service", "vid_like_service", "public", now))
+
+	if _, _, err := svc.LikeVideo(context.Background(), "vid_like_service", Actor{}, "req_1", "corr_1"); err == nil {
+		t.Fatal("LikeVideo() error = nil, want actor error")
+	}
+	counters, changed, err := svc.LikeVideo(context.Background(), "vid_like_service", Actor{UserID: "usr_123"}, "req_1", "corr_1")
+	if err != nil {
+		t.Fatalf("LikeVideo() error = %v", err)
+	}
+	if !changed || counters.LikeCount != 1 {
+		t.Fatalf("first like changed=%v counters=%#v", changed, counters)
+	}
+	counters, changed, err = svc.LikeVideo(context.Background(), "vid_like_service", Actor{UserID: "usr_123"}, "req_2", "corr_2")
+	if err != nil {
+		t.Fatalf("LikeVideo(duplicate) error = %v", err)
+	}
+	if changed || counters.LikeCount != 1 {
+		t.Fatalf("duplicate like changed=%v counters=%#v", changed, counters)
+	}
+}
+
+func TestCommentServiceLifecycle(t *testing.T) {
+	svc := NewFeedService(repository.NewMemoryStore(), Options{DefaultLimit: 1, MaxLimit: 1})
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	upsertReady(t, svc, readyInput("evt_comment_service", "vid_comment_service", "public", now))
+	comment, counters, err := svc.CreateComment(context.Background(), CreateCommentInput{
+		VideoID: "vid_comment_service",
+		Actor:   Actor{UserID: "usr_123"},
+		Body:    "hello",
+	})
+	if err != nil {
+		t.Fatalf("CreateComment() error = %v", err)
+	}
+	if comment.ID == "" || counters.CommentCount != 1 {
+		t.Fatalf("comment=%#v counters=%#v", comment, counters)
+	}
+	page, err := svc.ListComments(context.Background(), CommentQuery{VideoID: "vid_comment_service"})
+	if err != nil {
+		t.Fatalf("ListComments() error = %v", err)
+	}
+	if len(page.Comments) != 1 || page.Comments[0].ID != comment.ID {
+		t.Fatalf("page=%#v", page)
+	}
+	deleted, counters, changed, err := svc.DeleteComment(context.Background(), comment.ID, Actor{UserID: "usr_123"})
+	if err != nil {
+		t.Fatalf("DeleteComment() error = %v", err)
+	}
+	if !changed || deleted.Body != "" || counters.CommentCount != 0 {
+		t.Fatalf("deleted=%#v changed=%v counters=%#v", deleted, changed, counters)
+	}
+}
+
 func upsertReady(t *testing.T, svc *FeedService, input domain.ReadyVideoInput) {
 	t.Helper()
 	if _, _, err := svc.UpsertReadyVideo(context.Background(), input); err != nil {

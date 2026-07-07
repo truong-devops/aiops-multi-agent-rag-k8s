@@ -171,6 +171,98 @@ func TestInternalIngestionCreatesFeedItem(t *testing.T) {
 	}
 }
 
+func TestLikeRequiresTrustedUserContext(t *testing.T) {
+	app, svc := newFeedTestApp(t, testOptions{})
+	insertReadyVideo(t, svc, "evt_like_auth", "vid_like_auth", time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC))
+	req := httptest.NewRequest(http.MethodPut, "/v1/videos/vid_like_auth/like", nil)
+	rec := httptest.NewRecorder()
+
+	app.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLikeIsIdempotentAndUpdatesCounters(t *testing.T) {
+	app, svc := newFeedTestApp(t, testOptions{})
+	insertReadyVideo(t, svc, "evt_like", "vid_like", time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC))
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPut, "/v1/videos/vid_like/like", nil)
+		req.Header.Set("X-User-ID", "usr_123")
+		rec := httptest.NewRecorder()
+		app.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("like status = %d, body = %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	socialReq := httptest.NewRequest(http.MethodGet, "/v1/videos/vid_like/social", nil)
+	socialRec := httptest.NewRecorder()
+	app.ServeHTTP(socialRec, socialReq)
+	var body socialEnvelope
+	if err := json.Unmarshal(socialRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode social response: %v", err)
+	}
+	if body.Data.LikeCount != 1 {
+		t.Fatalf("like_count = %d, want 1", body.Data.LikeCount)
+	}
+
+	unlikeReq := httptest.NewRequest(http.MethodDelete, "/v1/videos/vid_like/like", nil)
+	unlikeReq.Header.Set("X-User-ID", "usr_123")
+	unlikeRec := httptest.NewRecorder()
+	app.ServeHTTP(unlikeRec, unlikeReq)
+	if unlikeRec.Code != http.StatusOK {
+		t.Fatalf("unlike status = %d, body = %s", unlikeRec.Code, unlikeRec.Body.String())
+	}
+}
+
+func TestCommentLifecycle(t *testing.T) {
+	app, svc := newFeedTestApp(t, testOptions{})
+	insertReadyVideo(t, svc, "evt_comment", "vid_comment", time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC))
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/videos/vid_comment/comments", strings.NewReader(`{"body":"hello feed"}`))
+	createReq.Header.Set("X-User-ID", "usr_123")
+	createRec := httptest.NewRecorder()
+	app.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", createRec.Code, createRec.Body.String())
+	}
+	var created commentEnvelope
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode comment response: %v", err)
+	}
+	if created.Data.ID == "" || created.Data.Body != "hello feed" || created.Counters.CommentCount != 1 {
+		t.Fatalf("created = %#v", created)
+	}
+
+	listRec := httptest.NewRecorder()
+	app.ServeHTTP(listRec, httptest.NewRequest(http.MethodGet, "/v1/videos/vid_comment/comments", nil))
+	var listed commentsEnvelope
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode comments response: %v", err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].ID != created.Data.ID {
+		t.Fatalf("listed = %#v", listed)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/comments/"+created.Data.ID, nil)
+	deleteReq.Header.Set("X-User-ID", "usr_123")
+	deleteRec := httptest.NewRecorder()
+	app.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", deleteRec.Code, deleteRec.Body.String())
+	}
+	var deleted deleteCommentEnvelope
+	if err := json.Unmarshal(deleteRec.Body.Bytes(), &deleted); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if !deleted.Deleted || deleted.Data.Body != "" || deleted.Counters.CommentCount != 0 {
+		t.Fatalf("deleted = %#v", deleted)
+	}
+}
+
 func newTestApp(readyErr error) http.Handler {
 	if readyErr == nil {
 		app, _ := newFeedTestApp(nil, testOptions{})
@@ -235,6 +327,30 @@ func (s stubReady) Ready(context.Context) error {
 
 func (s stubReady) ListFeed(context.Context, service.FeedQuery) (service.FeedPage, error) {
 	return service.FeedPage{}, s.err
+}
+
+func (s stubReady) GetSocialCounters(context.Context, string) (domain.VideoSocialCounters, error) {
+	return domain.VideoSocialCounters{}, s.err
+}
+
+func (s stubReady) LikeVideo(context.Context, string, service.Actor, string, string) (domain.VideoSocialCounters, bool, error) {
+	return domain.VideoSocialCounters{}, false, s.err
+}
+
+func (s stubReady) UnlikeVideo(context.Context, string, service.Actor, string, string) (domain.VideoSocialCounters, bool, error) {
+	return domain.VideoSocialCounters{}, false, s.err
+}
+
+func (s stubReady) CreateComment(context.Context, service.CreateCommentInput) (domain.Comment, domain.VideoSocialCounters, error) {
+	return domain.Comment{}, domain.VideoSocialCounters{}, s.err
+}
+
+func (s stubReady) ListComments(context.Context, service.CommentQuery) (service.CommentPage, error) {
+	return service.CommentPage{}, s.err
+}
+
+func (s stubReady) DeleteComment(context.Context, string, service.Actor) (domain.Comment, domain.VideoSocialCounters, bool, error) {
+	return domain.Comment{}, domain.VideoSocialCounters{}, false, s.err
 }
 
 func (s stubReady) UpsertReadyVideo(context.Context, domain.ReadyVideoInput) (domain.FeedItem, bool, error) {

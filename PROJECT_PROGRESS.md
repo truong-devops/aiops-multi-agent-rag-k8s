@@ -26,7 +26,7 @@ Keep entries concise. This file should help the next session continue, not becom
 
 ## Current State
 
-As of 2026-07-06:
+As of 2026-07-07:
 
 - The project direction is set: a Kubernetes-based microservices video/livestream platform used as a realistic testbed for AIOps RCA with Multi-Agent RAG, DevSecOps evidence, and GitOps-safe remediation.
 - The thesis framing is centered on Multi-Agent RAG for incident investigation and root cause analysis, not on building a commercial video product for its own sake.
@@ -37,7 +37,7 @@ As of 2026-07-06:
 - `api-gateway` now has route proxying, request/correlation IDs, CORS, body limits, upstream timeout, JWT verification through identity JWKS, trusted user-context forwarding, internal header stripping, JSON gateway/auth errors, readiness checks, and basic Prometheus text metrics.
 - `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation with optional MinIO/S3 object metadata verification, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, local/CI DB integration workflow, idempotent upload intent creation, MinIO/S3 presigned upload URLs, owner/internal authorization, pending outbox writes for `video.uploaded.v1`, and a Redpanda/Kafka outbox publisher worker.
 - `media-worker` now has a production-shaped scaffold, config validation, health/readiness/metrics, domain models for processing jobs/attempts/dead letters, PostgreSQL schema and repository, local in-memory test store, Kafka consumer for `video.uploaded.v1`, placeholder processing runner, FFmpeg/FFprobe processing mode, MinIO raw download/output upload, thumbnail generation, video-service internal status update client, retry/backoff, dead-letter behavior, lifecycle event contract builders, richer operational metrics/logging, a PostgreSQL integration-test target, and an FFmpeg smoke test.
-- `feed-social-service` now has a production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, local in-memory fallback, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert, stable feed list repository query, `GET /v1/feed`, `video.ready.v1` Kafka/Redpanda consumer, controlled internal ingestion fallback, repository/API/event tests, and a skipped-by-default PostgreSQL integration harness. It still needs likes, comments, follows, cache, and full compose/Kubernetes wiring.
+- `feed-social-service` now has a production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, local in-memory fallback, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert, stable feed list repository query, `GET /v1/feed`, `video.ready.v1` Kafka/Redpanda consumer, controlled internal ingestion fallback, idempotent likes, PostgreSQL comments MVP, durable like/comment counters, repository/API/event tests, and a skipped-by-default PostgreSQL integration harness. It still needs follows, cache, and full compose/Kubernetes wiring.
 - `live-service` is still mostly a skeleton with health, readiness, and metrics placeholders.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
 
@@ -58,6 +58,18 @@ As of 2026-07-06:
 - `video-service` remains the canonical video lifecycle event producer for now; `media-worker` updates status through the internal API and keeps lifecycle event contracts ready for a future direct outbox only if needed.
 
 ## Work Log
+
+### 2026-07-07
+
+- Implemented `feed-social-service` Phase 5 and Phase 6 from `docs/development/feed-social-service-implementation-plan.md`.
+- Added migration `002_social_schema.sql` for `likes` and PostgreSQL MVP `comments`.
+- Added domain models/validation for likes and comments, including visible/hidden/deleted/blocked comment statuses and public body redaction for deleted/non-visible comments.
+- Added idempotent `PUT /v1/videos/{video_id}/like`, `DELETE /v1/videos/{video_id}/like`, `GET /v1/videos/{video_id}/social`, `POST /v1/videos/{video_id}/comments`, `GET /v1/videos/{video_id}/comments`, and `DELETE /v1/comments/{comment_id}`.
+- Added transactional PostgreSQL updates for `like_count` and `comment_count`, plus local in-memory implementations for tests/dev.
+- Added handler, service, repository and domain tests for like idempotency, trusted user context, comment create/list/delete, body validation and counter updates.
+- Updated `services/feed-social-service/README.md`, `docs/development/feed-social-service-implementation-plan.md`, and `docs/development/implementation-plan.md`.
+- Verified with `go test ./...` in `services/feed-social-service`.
+- Notes for next session: add follows if needed for the product demo, or move to a compose smoke test that covers ready video ingestion, feed listing, like and comment.
 
 ### 2026-07-06
 
@@ -246,7 +258,7 @@ Recommended engineering order:
 2. Add Redis-backed rate limiting to `api-gateway` when the edge/auth foundation needs another hardening pass.
 3. Add Kubernetes/GitOps manifests and resource requests/limits for `video-service` and `media-worker`.
 4. Add a full compose smoke test for the video upload-to-processing flow.
-5. Implement `feed-social-service` Phase 5 likes and durable counters, then comments/follows if needed for the app demo.
+5. Implement `feed-social-service` Phase 7 follows if needed, then add a local compose smoke test for ready feed plus like/comment.
 6. Add admin-facing views for users, videos, processing jobs, service health, incidents, and RCA reports.
 7. Define incident fixtures, runbooks, ground truth, and evaluation metrics.
 8. Implement `aiops-service` evidence schema, collectors, RAG pipeline, agents, RCA synthesis, and evaluator.

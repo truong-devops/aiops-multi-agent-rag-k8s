@@ -28,12 +28,14 @@ Da co:
 - `GET /v1/feed` voi limit cap, cursor pagination va response envelope.
 - Kafka/Redpanda consumer cho `video.ready.v1`, chi chay khi `CONSUMER_ENABLED=true`.
 - Controlled internal ingestion API `POST /v1/internal/feed-items` duoc bao ve bang `X-Internal-Token`.
+- Likes idempotent voi durable `like_count`.
+- PostgreSQL comments MVP voi create/list/delete va durable `comment_count`.
 - Metrics cho feed operations, item count va event age.
 - Unit tests va skipped-by-default PostgreSQL integration harness.
 
 Chua co:
 
-- Likes, comments, follows.
+- Follows.
 - Redis cache va MongoDB comments/read model.
 
 ## API
@@ -44,20 +46,21 @@ Current direct service routes:
 - `GET /readyz`
 - `GET /metrics`
 - `GET /v1/feed?limit=&cursor=`
-- `POST /v1/internal/feed-items`
-
-Planned direct service routes:
-
 - `GET /v1/videos/{video_id}/social`
 - `PUT /v1/videos/{video_id}/like`
 - `DELETE /v1/videos/{video_id}/like`
 - `GET /v1/videos/{video_id}/comments?limit=&cursor=`
 - `POST /v1/videos/{video_id}/comments`
 - `DELETE /v1/comments/{comment_id}`
+- `POST /v1/internal/feed-items`
+
+Planned direct service routes:
+
 - `PUT /v1/users/{user_id}/follow`
 - `DELETE /v1/users/{user_id}/follow`
 
 Public clients should call through `api-gateway` under `/api/v1/*`.
+Write routes for likes/comments require trusted `X-User-ID` from `api-gateway`.
 
 ## Configuration
 
@@ -139,6 +142,24 @@ curl -X POST http://localhost:8080/v1/internal/feed-items \
 ```
 
 `POST /v1/internal/feed-items` is a controlled local/dev and MVP fallback. Prefer `video.ready.v1` consumption for real event-driven flow, and remove or restrict the fallback once the upload-to-processing-to-feed path is fully covered by events in deployment.
+
+Like and unlike a ready video:
+
+```bash
+curl -X PUT http://localhost:8080/v1/videos/vid_123/like -H 'X-User-ID: usr_123'
+curl -X DELETE http://localhost:8080/v1/videos/vid_123/like -H 'X-User-ID: usr_123'
+```
+
+Create and list comments:
+
+```bash
+curl -X POST http://localhost:8080/v1/videos/vid_123/comments \
+  -H 'Content-Type: application/json' \
+  -H 'X-User-ID: usr_123' \
+  -d '{"body":"hello feed"}'
+
+curl http://localhost:8080/v1/videos/vid_123/comments
+```
 
 ## Incident Scenarios
 

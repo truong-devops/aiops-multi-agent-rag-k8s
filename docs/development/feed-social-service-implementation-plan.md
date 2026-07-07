@@ -21,17 +21,17 @@ Service nay phuc vu hai muc tieu:
 
 ## Current Snapshot
 
-As of 2026-07-06:
+As of 2026-07-07:
 
 - `[x]` Da co Go module skeleton.
 - `[x]` Da co `cmd/server/main.go` production-shaped voi config loading, structured logging, graceful shutdown, body limit, request/correlation middleware va store wiring.
 - `[x]` Da co folder layout theo huong production: `internal/config`, `internal/domain`, `internal/event`, `internal/handler`, `internal/observability`, `internal/repository`, `internal/service`, `migrations`, `tests`.
 - `[x]` Da co config loader/validation cho runtime scaffold va feed limit baseline.
-- `[~]` Da co domain model cho feed item, social counters va inbox idempotency; like/comment/follow domain se lam o cac phase social sau.
+- `[~]` Da co domain model cho feed item, social counters, inbox idempotency, likes va comments; follow domain se lam o phase social sau.
 - `[x]` Da co PostgreSQL implementation cho feed read model; MongoDB/Redis chua them vi chua can cho MVP feed durable.
 - `[x]` Da co API `GET /v1/feed` voi limit cap, cursor pagination va response envelope.
 - `[x]` Da co ingestion tu `video.ready.v1` qua Kafka/Redpanda consumer va fallback `POST /v1/internal/feed-items` co `X-Internal-Token`.
-- `[ ]` Chua co likes/comments/follows.
+- `[~]` Da co likes/comments MVP voi durable counters; follows chua co.
 - `[~]` Da co metrics/logs scaffold cho HTTP, DB, feed operations, item count va event age; cache/social metrics se them theo cac phase sau.
 
 ## Boundary
@@ -184,8 +184,9 @@ Rules:
 PostgreSQL tables owned by `feed-social-service`:
 
 - `[x]` `feed_items` for MVP read model if keeping dependencies small.
-- `[ ]` `likes`
+- `[x]` `likes`
 - `[ ]` `follows`
+- `[x]` `comments` for PostgreSQL MVP comments.
 - `[x]` `video_social_counters`
 - `[x]` `inbox_events` for event idempotency.
 - `[ ]` `outbox_events` if social events are published.
@@ -205,8 +206,8 @@ Redis planned keys:
 
 Storage choice for first implementation:
 
-- Prefer PostgreSQL-only MVP for `feed_items`, `likes`, `follows`, and `video_social_counters`.
-- Add MongoDB comments in a later phase if comments need flexible nesting/read models.
+- Prefer PostgreSQL-only MVP for `feed_items`, `likes`, `comments`, `follows`, and `video_social_counters`.
+- Add MongoDB comments later only if comments need flexible nesting/read models.
 - Add Redis after durable behavior and metrics are stable.
 
 ## API Surface
@@ -216,16 +217,16 @@ Direct service routes:
 - `[x]` `GET /healthz`
 - `[x]` `GET /readyz`
 - `[x]` `GET /metrics`
-- `[ ]` `GET /v1/feed?limit=&cursor=`
-- `[ ]` `GET /v1/videos/{video_id}/social`
-- `[ ]` `PUT /v1/videos/{video_id}/like`
-- `[ ]` `DELETE /v1/videos/{video_id}/like`
-- `[ ]` `GET /v1/videos/{video_id}/comments?limit=&cursor=`
-- `[ ]` `POST /v1/videos/{video_id}/comments`
-- `[ ]` `DELETE /v1/comments/{comment_id}`
+- `[x]` `GET /v1/feed?limit=&cursor=`
+- `[x]` `GET /v1/videos/{video_id}/social`
+- `[x]` `PUT /v1/videos/{video_id}/like`
+- `[x]` `DELETE /v1/videos/{video_id}/like`
+- `[x]` `GET /v1/videos/{video_id}/comments?limit=&cursor=`
+- `[x]` `POST /v1/videos/{video_id}/comments`
+- `[x]` `DELETE /v1/comments/{comment_id}`
 - `[ ]` `PUT /v1/users/{user_id}/follow`
 - `[ ]` `DELETE /v1/users/{user_id}/follow`
-- `[ ]` Optional `POST /v1/internal/feed-items` for controlled MVP ingestion if `video.ready.v1` is not available yet.
+- `[x]` Optional `POST /v1/internal/feed-items` for controlled MVP ingestion if `video.ready.v1` is not available yet.
 
 Public clients should call through `api-gateway`:
 
@@ -392,14 +393,14 @@ Done criteria:
 
 ## Phase 5: Likes And Counters
 
-- `[ ]` Add `likes` table.
-- `[ ]` Add idempotent `PUT /v1/videos/{video_id}/like`.
-- `[ ]` Add idempotent `DELETE /v1/videos/{video_id}/like`.
-- `[ ]` Update `video_social_counters` transactionally from durable like writes.
-- `[ ]` Require trusted user context.
-- `[ ]` Add stable error codes for missing user, invalid video, invalid state and conflict.
+- `[x]` Add `likes` table.
+- `[x]` Add idempotent `PUT /v1/videos/{video_id}/like`.
+- `[x]` Add idempotent `DELETE /v1/videos/{video_id}/like`.
+- `[x]` Update `video_social_counters` transactionally from durable like writes.
+- `[x]` Require trusted user context.
+- `[x]` Add stable error codes for missing user, invalid video, invalid state and conflict.
 - `[ ]` Add optional `video.liked.v1` / `video.unliked.v1` outbox contract.
-- `[ ]` Add handler/service/repository tests.
+- `[x]` Add handler/service/repository tests.
 
 Done criteria:
 
@@ -409,15 +410,15 @@ Done criteria:
 
 ## Phase 6: Comments
 
-- `[ ]` Decide PostgreSQL MVP comments vs MongoDB comments.
-- `[ ]` Add comment domain and validation.
-- `[ ]` Add `POST /v1/videos/{video_id}/comments`.
-- `[ ]` Add `GET /v1/videos/{video_id}/comments`.
-- `[ ]` Add `DELETE /v1/comments/{comment_id}`.
-- `[ ]` Update durable `comment_count`.
-- `[ ]` Add optional moderation-ready status fields.
+- `[x]` Decide PostgreSQL MVP comments vs MongoDB comments.
+- `[x]` Add comment domain and validation.
+- `[x]` Add `POST /v1/videos/{video_id}/comments`.
+- `[x]` Add `GET /v1/videos/{video_id}/comments`.
+- `[x]` Add `DELETE /v1/comments/{comment_id}`.
+- `[x]` Update durable `comment_count`.
+- `[x]` Add optional moderation-ready status fields.
 - `[ ]` Add optional `comment.created.v1` / `comment.deleted.v1` outbox contract.
-- `[ ]` Add tests for create/list/delete and body validation.
+- `[x]` Add tests for create/list/delete and body validation.
 
 Done criteria:
 
@@ -492,10 +493,10 @@ Done criteria:
 
 Next best engineering task:
 
-1. Add Phase 5 likes and durable counters.
-2. Add Phase 6 comments.
-3. Add Phase 7 follows.
-4. Add cache only after durable feed/social behavior is stable.
+1. Add Phase 7 follows.
+2. Decide whether optional social outbox events are needed before cache.
+3. Add cache only after durable feed/social behavior is stable.
+4. Add local compose smoke test for ready video ingestion to feed listing plus like/comment.
 
 Reason:
 

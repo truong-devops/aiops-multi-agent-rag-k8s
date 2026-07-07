@@ -42,6 +42,41 @@ func (s InstrumentedStore) ListFeedItems(ctx context.Context, filter ListFeedFil
 	return out, err
 }
 
+func (s InstrumentedStore) GetSocialCounters(ctx context.Context, videoID string) (domain.VideoSocialCounters, error) {
+	startedAt := s.now()
+	out, err := s.next.GetSocialCounters(ctx, videoID)
+	s.record("get_social_counters", err, startedAt)
+	return out, err
+}
+
+func (s InstrumentedStore) SetVideoLike(ctx context.Context, mutation SocialMutation, liked bool) (domain.VideoSocialCounters, bool, error) {
+	startedAt := s.now()
+	out, changed, err := s.next.SetVideoLike(ctx, mutation, liked)
+	s.record("set_video_like", err, startedAt)
+	return out, changed, err
+}
+
+func (s InstrumentedStore) CreateComment(ctx context.Context, comment domain.Comment) (domain.Comment, domain.VideoSocialCounters, error) {
+	startedAt := s.now()
+	out, counters, err := s.next.CreateComment(ctx, comment)
+	s.record("create_comment", err, startedAt)
+	return out, counters, err
+}
+
+func (s InstrumentedStore) ListComments(ctx context.Context, filter ListCommentsFilter) ([]domain.Comment, error) {
+	startedAt := s.now()
+	out, err := s.next.ListComments(ctx, filter)
+	s.record("list_comments", err, startedAt)
+	return out, err
+}
+
+func (s InstrumentedStore) DeleteComment(ctx context.Context, commentID string, actorID string, actorRole string, now time.Time) (domain.Comment, domain.VideoSocialCounters, bool, error) {
+	startedAt := s.now()
+	out, counters, changed, err := s.next.DeleteComment(ctx, commentID, actorID, actorRole, now)
+	s.record("delete_comment", err, startedAt)
+	return out, counters, changed, err
+}
+
 func (s InstrumentedStore) Ping(ctx context.Context) error {
 	startedAt := s.now()
 	err := s.next.Ping(ctx)

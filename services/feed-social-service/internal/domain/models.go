@@ -10,6 +10,14 @@ const (
 	FeedItemStatusHidden  = "hidden"
 	FeedItemStatusDeleted = "deleted"
 
+	LikeStatusActive  = "active"
+	LikeStatusDeleted = "deleted"
+
+	CommentStatusVisible = "visible"
+	CommentStatusHidden  = "hidden"
+	CommentStatusDeleted = "deleted"
+	CommentStatusBlocked = "blocked"
+
 	InboxStatusProcessed = "processed"
 	InboxStatusDuplicate = "duplicate"
 )
@@ -43,6 +51,29 @@ type FeedItemWithCounters struct {
 	Counters VideoSocialCounters
 }
 
+type Like struct {
+	ID            string
+	VideoID       string
+	UserID        string
+	Status        string
+	RequestID     string
+	CorrelationID string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type Comment struct {
+	ID            string
+	VideoID       string
+	UserID        string
+	Body          string
+	Status        string
+	RequestID     string
+	CorrelationID string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type InboxEvent struct {
 	ID            string
 	EventName     string
@@ -69,6 +100,14 @@ type ReadyVideoInput struct {
 	CorrelationID      string
 	ReadyAt            time.Time
 	ReceivedAt         time.Time
+}
+
+type CommentInput struct {
+	VideoID       string
+	UserID        string
+	Body          string
+	RequestID     string
+	CorrelationID string
 }
 
 func NewFeedItemFromReadyVideo(input ReadyVideoInput, now time.Time) (FeedItem, error) {
@@ -111,9 +150,67 @@ func NewFeedItemFromReadyVideo(input ReadyVideoInput, now time.Time) (FeedItem, 
 	}, nil
 }
 
+func NewComment(input CommentInput, now time.Time) (Comment, error) {
+	videoID := strings.TrimSpace(input.VideoID)
+	if videoID == "" {
+		return Comment{}, ValidationError("video_id is required.")
+	}
+	userID := strings.TrimSpace(input.UserID)
+	if userID == "" {
+		return Comment{}, ValidationError("user_id is required.")
+	}
+	body := strings.TrimSpace(input.Body)
+	if body == "" {
+		return Comment{}, ValidationError("comment body is required.")
+	}
+	if len([]rune(body)) > 2000 {
+		return Comment{}, ValidationError("comment body must be at most 2000 characters.")
+	}
+	now = now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	return Comment{
+		ID:            NewID("comment"),
+		VideoID:       videoID,
+		UserID:        userID,
+		Body:          body,
+		Status:        CommentStatusVisible,
+		RequestID:     strings.TrimSpace(input.RequestID),
+		CorrelationID: strings.TrimSpace(input.CorrelationID),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}, nil
+}
+
+func (c Comment) PublicBody() string {
+	if c.Status != CommentStatusVisible {
+		return ""
+	}
+	return c.Body
+}
+
 func ValidFeedItemStatus(value string) bool {
 	switch value {
 	case FeedItemStatusActive, FeedItemStatusHidden, FeedItemStatusDeleted:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidLikeStatus(value string) bool {
+	switch value {
+	case LikeStatusActive, LikeStatusDeleted:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidCommentStatus(value string) bool {
+	switch value {
+	case CommentStatusVisible, CommentStatusHidden, CommentStatusDeleted, CommentStatusBlocked:
 		return true
 	default:
 		return false

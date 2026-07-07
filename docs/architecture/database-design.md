@@ -426,9 +426,9 @@ Indexes:
 
 ## 8. feed-social-service
 
-Primary DB: PostgreSQL + MongoDB.
+Primary DB: PostgreSQL first for MVP, with MongoDB reserved for richer comment/feed documents later.
 
-PostgreSQL owns relationship/interaction facts that need unique constraints. MongoDB owns flexible documents such as comments and feed read models.
+PostgreSQL owns relationship/interaction facts that need unique constraints. The current MVP also stores `feed_items` and simple flat `comments` in PostgreSQL to keep the runnable product path small and transactional. MongoDB can own flexible documents such as threaded comments, moderation documents and richer feed snapshots later.
 
 ### PostgreSQL: `likes`
 
@@ -473,7 +473,23 @@ Counters should be updated from durable interaction writes, not only Redis.
 | `share_count` | `bigint` | yes | default `0` |
 | `updated_at` | `timestamptz` | yes | UTC |
 
-### MongoDB: `comments`
+### PostgreSQL MVP: `comments`
+
+Flat MVP comments live in PostgreSQL so `comment_count` can be updated transactionally with comment create/delete.
+
+| Field | Type | Required | Notes |
+|---|---|---:|---|
+| `id` | `text` | yes | `comment_...` |
+| `video_id` | `text` | yes | cross-service reference |
+| `user_id` | `text` | yes | cross-service reference |
+| `body` | `text` | yes | cleared on delete |
+| `status` | `text` | yes | `visible`, `hidden`, `deleted`, `blocked` |
+| `request_id` | `text` | no | trace context |
+| `correlation_id` | `text` | no | trace context |
+| `created_at` | `timestamptz` | yes | UTC |
+| `updated_at` | `timestamptz` | yes | UTC |
+
+### MongoDB Later: `comments`
 
 Collection: `feed_social_docdb.comments`
 
@@ -882,15 +898,16 @@ video-service writes PostgreSQL videos/upload_requests
 -> publishes video.uploaded
 -> media-worker writes PostgreSQL processing_jobs/attempts
 -> media-worker updates video-service through API/event
--> feed-social-service builds MongoDB feed_items from video.ready
+-> feed-social-service builds PostgreSQL feed_items from video.ready
 ```
 
 ### Feed and social
 
 ```text
 likes/follows -> PostgreSQL
-comments -> MongoDB
-feed read model -> MongoDB
+MVP comments -> PostgreSQL
+MVP feed read model -> PostgreSQL
+rich comments/feed snapshots later -> MongoDB
 feed cache -> Redis
 ```
 
@@ -910,7 +927,7 @@ UI progress/cache -> Redis
 2. Implement `video-service` PostgreSQL schema and outbox table.
 3. Implement `media-worker` PostgreSQL jobs/attempts schema.
 4. Add Redis for gateway rate limit and media-worker lock.
-5. Implement `feed-social-service` PostgreSQL likes/follows and MongoDB comments/feed items.
+5. Implement `feed-social-service` PostgreSQL feed items, likes, simple comments and counters; add MongoDB comments/feed snapshots only when richer document behavior is needed.
 6. Implement `aiops-service` MongoDB incidents/evidence/RCA collections.
 7. Add live-service PostgreSQL session schema and Redis heartbeat/viewer count.
 

@@ -8,7 +8,9 @@ const (
 	CodeInvalidFeedItemState   = "INVALID_FEED_ITEM_STATE"
 	CodeServiceNotReady        = "SERVICE_NOT_READY"
 	CodeUnauthorized           = "UNAUTHORIZED"
+	CodeForbidden              = "FORBIDDEN"
 	CodeInternalAPIUnavailable = "INTERNAL_API_UNAVAILABLE"
+	CodeCommentNotFound        = "COMMENT_NOT_FOUND"
 	CodeRouteNotFound          = "ROUTE_NOT_FOUND"
 	CodeMethodNotAllowed       = "METHOD_NOT_ALLOWED"
 	CodeInternal               = "INTERNAL_ERROR"
@@ -38,4 +40,8 @@ func NotFound(code string, message string) *AppError {
 
 func Conflict(code string, message string) *AppError {
 	return NewError(http.StatusConflict, code, message)
+}
+
+func Forbidden(message string) *AppError {
+	return NewError(http.StatusForbidden, CodeForbidden, message)
 }

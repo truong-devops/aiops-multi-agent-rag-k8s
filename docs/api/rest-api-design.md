@@ -553,11 +553,13 @@ Response:
         "display_name": "Creator"
       },
       "title": "My first video",
-      "thumbnail_url": "https://...",
-      "playback_url": "https://...",
+      "description": "Short description",
+      "thumbnail_object_key": "thumbnails/vid_01HX/poster.jpg",
+      "playback_object_key": "processed/vid_01HX/source.mp4",
+      "duration_ms": 12340,
       "like_count": 10,
       "comment_count": 2,
-      "created_at": "2026-06-13T10:00:00Z"
+      "ready_at": "2026-06-13T10:00:00Z"
     }
   ],
   "page": {
@@ -578,12 +580,33 @@ DELETE /api/v1/videos/{video_id}/like
 
 Use `PUT` because liking is idempotent.
 
+Response:
+
+```json
+{
+  "data": {
+    "video_id": "vid_01HX...",
+    "like_count": 11,
+    "comment_count": 2,
+    "share_count": 0
+  },
+  "liked": true,
+  "changed": true,
+  "request_id": "req_01HX..."
+}
+```
+
+### Social Counters
+
+```text
+GET /api/v1/videos/{video_id}/social
+```
+
 ### Comments
 
 ```text
 GET  /api/v1/videos/{video_id}/comments?limit=20&cursor=...
 POST /api/v1/videos/{video_id}/comments
-GET  /api/v1/comments/{comment_id}
 DELETE /api/v1/comments/{comment_id}
 ```
 
@@ -594,6 +617,8 @@ Create comment request:
   "body": "Nice video!"
 }
 ```
+
+Comment response bodies should not expose deleted or hidden comment text.
 
 ### Follow User
 

@@ -48,3 +48,21 @@ func TestFeedItemTransitions(t *testing.T) {
 		t.Fatal("deleted -> active should not be allowed")
 	}
 }
+
+func TestNewCommentValidation(t *testing.T) {
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	comment, err := NewComment(CommentInput{
+		VideoID: "vid_123",
+		UserID:  "usr_123",
+		Body:    " hello ",
+	}, now)
+	if err != nil {
+		t.Fatalf("NewComment() error = %v", err)
+	}
+	if comment.ID == "" || comment.Body != "hello" || comment.Status != CommentStatusVisible {
+		t.Fatalf("comment = %#v", comment)
+	}
+	if _, err := NewComment(CommentInput{VideoID: "vid_123", UserID: "usr_123"}, now); err == nil {
+		t.Fatal("NewComment() error = nil, want body validation error")
+	}
+}

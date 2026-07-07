@@ -18,6 +18,12 @@ import (
 type FeedService interface {
 	Ready(ctx context.Context) error
 	ListFeed(ctx context.Context, query service.FeedQuery) (service.FeedPage, error)
+	GetSocialCounters(ctx context.Context, videoID string) (domain.VideoSocialCounters, error)
+	LikeVideo(ctx context.Context, videoID string, actor service.Actor, requestID string, correlationID string) (domain.VideoSocialCounters, bool, error)
+	UnlikeVideo(ctx context.Context, videoID string, actor service.Actor, requestID string, correlationID string) (domain.VideoSocialCounters, bool, error)
+	CreateComment(ctx context.Context, input service.CreateCommentInput) (domain.Comment, domain.VideoSocialCounters, error)
+	ListComments(ctx context.Context, query service.CommentQuery) (service.CommentPage, error)
+	DeleteComment(ctx context.Context, commentID string, actor service.Actor) (domain.Comment, domain.VideoSocialCounters, bool, error)
 	UpsertReadyVideo(ctx context.Context, input domain.ReadyVideoInput) (domain.FeedItem, bool, error)
 }
 
@@ -42,6 +48,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, metrics http.HandlerFunc) {
 	mux.HandleFunc("/healthz", h.text("ok\n"))
 	mux.HandleFunc("/readyz", h.readyz)
 	mux.HandleFunc("/v1/feed", h.listFeed)
+	mux.HandleFunc("/v1/videos/", h.videoResource)
+	mux.HandleFunc("/v1/comments/", h.commentResource)
 	mux.HandleFunc("/v1/internal/feed-items", h.ingestFeedItem)
 	if metrics != nil {
 		mux.HandleFunc("/metrics", metrics)
@@ -117,6 +125,152 @@ func (h *Handler) ingestFeedItem(w http.ResponseWriter, req *http.Request) {
 	writeRawJSON(w, status, readyVideoEnvelope{
 		Data:      feedItemResponse(domain.FeedItemWithCounters{Item: item}),
 		Created:   created,
+		RequestID: observability.RequestIDFromContext(req.Context()),
+	})
+}
+
+func (h *Handler) videoResource(w http.ResponseWriter, req *http.Request) {
+	videoID, resource, ok := parseNestedResource(req.URL.Path, "/v1/videos/")
+	if !ok {
+		h.notFound(w, req)
+		return
+	}
+	switch resource {
+	case "social":
+		h.social(w, req, videoID)
+	case "like":
+		h.like(w, req, videoID)
+	case "comments":
+		h.videoComments(w, req, videoID)
+	default:
+		h.notFound(w, req)
+	}
+}
+
+func (h *Handler) commentResource(w http.ResponseWriter, req *http.Request) {
+	commentID := strings.Trim(strings.TrimPrefix(req.URL.Path, "/v1/comments/"), "/")
+	if commentID == "" || strings.Contains(commentID, "/") {
+		h.notFound(w, req)
+		return
+	}
+	if !requireMethod(w, req, http.MethodDelete) {
+		return
+	}
+	comment, counters, deleted, err := h.service.DeleteComment(req.Context(), commentID, actorFromRequest(req))
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	writeRawJSON(w, http.StatusOK, deleteCommentEnvelope{
+		Data:      commentResponse(comment),
+		Counters:  socialResponse(counters),
+		Deleted:   deleted,
+		RequestID: observability.RequestIDFromContext(req.Context()),
+	})
+}
+
+func (h *Handler) social(w http.ResponseWriter, req *http.Request, videoID string) {
+	if !requireMethod(w, req, http.MethodGet) {
+		return
+	}
+	counters, err := h.service.GetSocialCounters(req.Context(), videoID)
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	writeRawJSON(w, http.StatusOK, socialEnvelope{
+		Data:      socialResponse(counters),
+		RequestID: observability.RequestIDFromContext(req.Context()),
+	})
+}
+
+func (h *Handler) like(w http.ResponseWriter, req *http.Request, videoID string) {
+	actor := actorFromRequest(req)
+	requestID := observability.RequestIDFromContext(req.Context())
+	correlationID := observability.CorrelationIDFromContext(req.Context())
+	var (
+		counters domain.VideoSocialCounters
+		changed  bool
+		err      error
+		liked    bool
+	)
+	switch req.Method {
+	case http.MethodPut:
+		counters, changed, err = h.service.LikeVideo(req.Context(), videoID, actor, requestID, correlationID)
+		liked = true
+	case http.MethodDelete:
+		counters, changed, err = h.service.UnlikeVideo(req.Context(), videoID, actor, requestID, correlationID)
+	default:
+		writeError(w, req, domain.NewError(http.StatusMethodNotAllowed, domain.CodeMethodNotAllowed, "HTTP method is not allowed for this route."))
+		return
+	}
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	writeRawJSON(w, http.StatusOK, likeEnvelope{
+		Data:      socialResponse(counters),
+		Liked:     liked,
+		Changed:   changed,
+		RequestID: requestID,
+	})
+}
+
+func (h *Handler) videoComments(w http.ResponseWriter, req *http.Request, videoID string) {
+	switch req.Method {
+	case http.MethodGet:
+		h.listComments(w, req, videoID)
+	case http.MethodPost:
+		h.createComment(w, req, videoID)
+	default:
+		writeError(w, req, domain.NewError(http.StatusMethodNotAllowed, domain.CodeMethodNotAllowed, "HTTP method is not allowed for this route."))
+	}
+}
+
+func (h *Handler) listComments(w http.ResponseWriter, req *http.Request, videoID string) {
+	limit, err := parseOptionalInt(req.URL.Query().Get("limit"))
+	if err != nil {
+		writeError(w, req, domain.ValidationError("limit must be an integer."))
+		return
+	}
+	page, err := h.service.ListComments(req.Context(), service.CommentQuery{
+		VideoID: videoID,
+		Limit:   limit,
+		Cursor:  req.URL.Query().Get("cursor"),
+	})
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	writeRawJSON(w, http.StatusOK, commentsEnvelope{
+		Data:      commentsResponse(page.Comments),
+		Page:      pageResponse{Limit: page.Limit, NextCursor: page.NextCursor, HasMore: page.HasMore},
+		RequestID: observability.RequestIDFromContext(req.Context()),
+	})
+}
+
+func (h *Handler) createComment(w http.ResponseWriter, req *http.Request, videoID string) {
+	var body createCommentRequest
+	decoder := json.NewDecoder(req.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		writeError(w, req, domain.ValidationError("request body must be valid JSON."))
+		return
+	}
+	comment, counters, err := h.service.CreateComment(req.Context(), service.CreateCommentInput{
+		VideoID:       videoID,
+		Actor:         actorFromRequest(req),
+		Body:          body.Body,
+		RequestID:     observability.RequestIDFromContext(req.Context()),
+		CorrelationID: observability.CorrelationIDFromContext(req.Context()),
+	})
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	writeRawJSON(w, http.StatusCreated, commentEnvelope{
+		Data:      commentResponse(comment),
+		Counters:  socialResponse(counters),
 		RequestID: observability.RequestIDFromContext(req.Context()),
 	})
 }
@@ -204,6 +358,64 @@ func feedItemResponse(item domain.FeedItemWithCounters) feedItemBody {
 	}
 }
 
+func commentsResponse(comments []domain.Comment) []commentBody {
+	out := make([]commentBody, 0, len(comments))
+	for _, comment := range comments {
+		out = append(out, commentResponse(comment))
+	}
+	return out
+}
+
+func commentResponse(comment domain.Comment) commentBody {
+	return commentBody{
+		ID:        comment.ID,
+		VideoID:   comment.VideoID,
+		UserID:    comment.UserID,
+		Body:      comment.PublicBody(),
+		Status:    comment.Status,
+		CreatedAt: comment.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt: comment.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+func socialResponse(counters domain.VideoSocialCounters) socialBody {
+	return socialBody{
+		VideoID:      counters.VideoID,
+		LikeCount:    counters.LikeCount,
+		CommentCount: counters.CommentCount,
+		ShareCount:   counters.ShareCount,
+	}
+}
+
+func actorFromRequest(req *http.Request) service.Actor {
+	return service.Actor{
+		UserID: strings.TrimSpace(req.Header.Get("X-User-ID")),
+		Role:   actorRoleFromRequest(req),
+	}
+}
+
+func actorRoleFromRequest(req *http.Request) string {
+	if role := strings.ToLower(strings.TrimSpace(req.Header.Get("X-User-Role"))); role != "" {
+		return role
+	}
+	for _, role := range strings.Split(req.Header.Get("X-User-Roles"), ",") {
+		role = strings.ToLower(strings.TrimSpace(role))
+		if role == "admin" {
+			return role
+		}
+	}
+	return ""
+}
+
+func parseNestedResource(path string, prefix string) (string, string, bool) {
+	rest := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
 type errorEnvelope struct {
 	Error     errorBody `json:"error"`
 	RequestID string    `json:"request_id,omitempty"`
@@ -227,6 +439,37 @@ type readyVideoEnvelope struct {
 	RequestID string       `json:"request_id,omitempty"`
 }
 
+type socialEnvelope struct {
+	Data      socialBody `json:"data"`
+	RequestID string     `json:"request_id,omitempty"`
+}
+
+type likeEnvelope struct {
+	Data      socialBody `json:"data"`
+	Liked     bool       `json:"liked"`
+	Changed   bool       `json:"changed"`
+	RequestID string     `json:"request_id,omitempty"`
+}
+
+type commentsEnvelope struct {
+	Data      []commentBody `json:"data"`
+	Page      pageResponse  `json:"page"`
+	RequestID string        `json:"request_id,omitempty"`
+}
+
+type commentEnvelope struct {
+	Data      commentBody `json:"data"`
+	Counters  socialBody  `json:"counters"`
+	RequestID string      `json:"request_id,omitempty"`
+}
+
+type deleteCommentEnvelope struct {
+	Data      commentBody `json:"data"`
+	Counters  socialBody  `json:"counters"`
+	Deleted   bool        `json:"deleted"`
+	RequestID string      `json:"request_id,omitempty"`
+}
+
 type feedItemBody struct {
 	VideoID            string    `json:"video_id"`
 	Owner              ownerBody `json:"owner"`
@@ -238,6 +481,23 @@ type feedItemBody struct {
 	LikeCount          int64     `json:"like_count"`
 	CommentCount       int64     `json:"comment_count"`
 	ReadyAt            string    `json:"ready_at"`
+}
+
+type socialBody struct {
+	VideoID      string `json:"video_id"`
+	LikeCount    int64  `json:"like_count"`
+	CommentCount int64  `json:"comment_count"`
+	ShareCount   int64  `json:"share_count"`
+}
+
+type commentBody struct {
+	ID        string `json:"id"`
+	VideoID   string `json:"video_id"`
+	UserID    string `json:"user_id"`
+	Body      string `json:"body"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 type ownerBody struct {
@@ -262,6 +522,10 @@ type ingestReadyVideoRequest struct {
 	DurationMs         int64      `json:"duration_ms"`
 	Visibility         string     `json:"visibility"`
 	ReadyAt            *time.Time `json:"ready_at"`
+}
+
+type createCommentRequest struct {
+	Body string `json:"body"`
 }
 
 func (r ingestReadyVideoRequest) toInput(req *http.Request) domain.ReadyVideoInput {

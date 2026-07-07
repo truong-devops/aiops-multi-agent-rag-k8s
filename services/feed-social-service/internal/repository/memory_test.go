@@ -70,6 +70,77 @@ func TestMemoryStoreListFeedItems(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreLikeIsIdempotent(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	insertFeedItem(t, store, readyVideoInput("evt_like_repo", "vid_like_repo", now))
+
+	counters, changed, err := store.SetVideoLike(context.Background(), SocialMutation{VideoID: "vid_like_repo", UserID: "usr_123", Now: now}, true)
+	if err != nil {
+		t.Fatalf("SetVideoLike() error = %v", err)
+	}
+	if !changed || counters.LikeCount != 1 {
+		t.Fatalf("first like changed=%v counters=%#v", changed, counters)
+	}
+	counters, changed, err = store.SetVideoLike(context.Background(), SocialMutation{VideoID: "vid_like_repo", UserID: "usr_123", Now: now}, true)
+	if err != nil {
+		t.Fatalf("SetVideoLike(duplicate) error = %v", err)
+	}
+	if changed || counters.LikeCount != 1 {
+		t.Fatalf("duplicate like changed=%v counters=%#v", changed, counters)
+	}
+	counters, changed, err = store.SetVideoLike(context.Background(), SocialMutation{VideoID: "vid_like_repo", UserID: "usr_123", Now: now}, false)
+	if err != nil {
+		t.Fatalf("SetVideoLike(unlike) error = %v", err)
+	}
+	if !changed || counters.LikeCount != 0 {
+		t.Fatalf("unlike changed=%v counters=%#v", changed, counters)
+	}
+}
+
+func TestMemoryStoreCommentLifecycle(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	insertFeedItem(t, store, readyVideoInput("evt_comment_repo", "vid_comment_repo", now))
+	comment, err := domain.NewComment(domain.CommentInput{VideoID: "vid_comment_repo", UserID: "usr_123", Body: "hello"}, now)
+	if err != nil {
+		t.Fatalf("NewComment() error = %v", err)
+	}
+
+	created, counters, err := store.CreateComment(context.Background(), comment)
+	if err != nil {
+		t.Fatalf("CreateComment() error = %v", err)
+	}
+	if created.ID == "" || counters.CommentCount != 1 {
+		t.Fatalf("created=%#v counters=%#v", created, counters)
+	}
+	comments, err := store.ListComments(context.Background(), ListCommentsFilter{VideoID: "vid_comment_repo", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListComments() error = %v", err)
+	}
+	if len(comments) != 1 || comments[0].ID != created.ID {
+		t.Fatalf("comments=%#v", comments)
+	}
+	deleted, counters, changed, err := store.DeleteComment(context.Background(), created.ID, "usr_123", "", now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("DeleteComment() error = %v", err)
+	}
+	if !changed || deleted.Body != "" || counters.CommentCount != 0 {
+		t.Fatalf("deleted=%#v changed=%v counters=%#v", deleted, changed, counters)
+	}
+}
+
+func insertFeedItem(t *testing.T, store *MemoryStore, input domain.ReadyVideoInput) {
+	t.Helper()
+	item, err := domain.NewFeedItemFromReadyVideo(input, input.ReadyAt)
+	if err != nil {
+		t.Fatalf("NewFeedItemFromReadyVideo() error = %v", err)
+	}
+	if _, _, err := store.UpsertFeedItemFromReadyVideo(context.Background(), input, item); err != nil {
+		t.Fatalf("UpsertFeedItemFromReadyVideo() error = %v", err)
+	}
+}
+
 func readyVideoInput(eventID string, videoID string, readyAt time.Time) domain.ReadyVideoInput {
 	return domain.ReadyVideoInput{
 		EventID:            eventID,
