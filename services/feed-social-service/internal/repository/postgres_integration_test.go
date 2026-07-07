@@ -79,7 +79,7 @@ func TestPostgresStoreFeedItemFlow(t *testing.T) {
 
 func applyFeedMigrations(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, name := range []string{"001_feed_schema.sql", "002_social_schema.sql"} {
+	for _, name := range []string{"001_feed_schema.sql", "002_social_schema.sql", "003_follows_schema.sql"} {
 		path := filepath.Join("..", "..", "migrations", name)
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -98,6 +98,7 @@ func truncateFeedTables(t *testing.T, db *sql.DB) {
 			video_social_counters,
 			comments,
 			likes,
+			follows,
 			feed_items,
 			inbox_events
 		RESTART IDENTITY CASCADE

@@ -22,6 +22,10 @@ const commentColumns = `
 	id, video_id, user_id, body, status, COALESCE(request_id, ''), COALESCE(correlation_id, ''), created_at, updated_at
 `
 
+const followColumns = `
+	id, follower_id, followee_id, status, COALESCE(request_id, ''), COALESCE(correlation_id, ''), created_at, updated_at
+`
+
 type PostgresStore struct {
 	db *sql.DB
 }
@@ -425,6 +429,64 @@ func (s *PostgresStore) DeleteComment(ctx context.Context, commentID string, act
 	return comment, counters, true, nil
 }
 
+func (s *PostgresStore) SetFollow(ctx context.Context, mutation FollowMutation, following bool) (domain.Follow, bool, error) {
+	now := mutation.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if following {
+		result, err := s.db.ExecContext(ctx, `
+			INSERT INTO follows (
+				id, follower_id, followee_id, status, request_id, correlation_id, created_at, updated_at
+			)
+			VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $7)
+			ON CONFLICT (follower_id, followee_id) DO UPDATE
+			SET status = EXCLUDED.status,
+			    request_id = EXCLUDED.request_id,
+			    correlation_id = EXCLUDED.correlation_id,
+			    updated_at = EXCLUDED.updated_at
+			WHERE follows.status <> $4
+		`, domain.NewID("follow"), strings.TrimSpace(mutation.FollowerID), strings.TrimSpace(mutation.FolloweeID), domain.FollowStatusActive, mutation.RequestID, mutation.CorrelationID, now)
+		if err != nil {
+			return domain.Follow{}, false, err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return domain.Follow{}, false, err
+		}
+		follow, err := findFollow(ctx, s.db, mutation.FollowerID, mutation.FolloweeID)
+		return follow, rows > 0, err
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE follows
+		SET status = $3,
+		    request_id = NULLIF($4, ''),
+		    correlation_id = NULLIF($5, ''),
+		    updated_at = $6
+		WHERE follower_id = $1 AND followee_id = $2 AND status = $7
+	`, strings.TrimSpace(mutation.FollowerID), strings.TrimSpace(mutation.FolloweeID), domain.FollowStatusDeleted, mutation.RequestID, mutation.CorrelationID, now, domain.FollowStatusActive)
+	if err != nil {
+		return domain.Follow{}, false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return domain.Follow{}, false, err
+	}
+	follow, err := findFollow(ctx, s.db, mutation.FollowerID, mutation.FolloweeID)
+	var appErr *domain.AppError
+	if errors.As(err, &appErr) && appErr.Code == domain.CodeFollowNotFound {
+		return domain.Follow{
+			ID:         domain.NewID("follow"),
+			FollowerID: strings.TrimSpace(mutation.FollowerID),
+			FolloweeID: strings.TrimSpace(mutation.FolloweeID),
+			Status:     domain.FollowStatusDeleted,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}, false, nil
+	}
+	return follow, rows > 0, err
+}
+
 type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
@@ -523,4 +585,32 @@ func scanComment(scanner sqlScanner) (domain.Comment, error) {
 		&comment.UpdatedAt,
 	)
 	return comment, err
+}
+
+func findFollow(ctx context.Context, q queryer, followerID string, followeeID string) (domain.Follow, error) {
+	row := q.QueryRowContext(ctx, `
+		SELECT `+followColumns+`
+		FROM follows
+		WHERE follower_id = $1 AND followee_id = $2
+	`, strings.TrimSpace(followerID), strings.TrimSpace(followeeID))
+	follow, err := scanFollow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Follow{}, domain.NotFound(domain.CodeFollowNotFound, "Follow was not found.")
+	}
+	return follow, err
+}
+
+func scanFollow(scanner sqlScanner) (domain.Follow, error) {
+	var follow domain.Follow
+	err := scanner.Scan(
+		&follow.ID,
+		&follow.FollowerID,
+		&follow.FolloweeID,
+		&follow.Status,
+		&follow.RequestID,
+		&follow.CorrelationID,
+		&follow.CreatedAt,
+		&follow.UpdatedAt,
+	)
+	return follow, err
 }

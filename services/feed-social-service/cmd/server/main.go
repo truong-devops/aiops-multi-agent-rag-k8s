@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/cache"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/config"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/event"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/handler"
@@ -37,12 +38,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer closeStore()
+	cacheStore, closeCache, err := openCache(context.Background(), cfg, logger)
+	if err != nil {
+		logger.Error("failed to initialize cache", "service", serviceName, "error", err)
+		os.Exit(1)
+	}
+	defer closeCache()
 
 	feedService := service.NewFeedService(store, service.Options{
 		Metrics:      metrics,
 		Logger:       logger,
 		DefaultLimit: cfg.FeedDefaultLimit,
 		MaxLimit:     cfg.FeedMaxLimit,
+		Cache:        cacheStore,
+		CacheTTL:     cfg.FeedCacheTTL,
 	})
 	consumerCtx, stopConsumer := context.WithCancel(context.Background())
 	closeConsumer := startReadyConsumer(consumerCtx, cfg, feedService, logger, metrics)
@@ -106,6 +115,27 @@ func openStore(ctx context.Context, cfg config.Config, logger *slog.Logger, metr
 
 	logger.Warn("using in-memory feed store; this is only suitable for local development", "service", serviceName, "environment", cfg.Environment)
 	return repository.NewInstrumentedStore(repository.NewMemoryStore(), metrics), func() {}, nil
+}
+
+func openCache(ctx context.Context, cfg config.Config, logger *slog.Logger) (cache.Store, func(), error) {
+	if !cfg.CacheEnabled {
+		logger.Info("cache disabled; using no-op cache", "service", serviceName, "environment", cfg.Environment)
+		return cache.NewNoopStore(), func() {}, nil
+	}
+	store, err := cache.NewRedisStore(cfg.RedisURL)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := store.Ping(ctx); err != nil {
+		_ = store.Close()
+		return nil, nil, err
+	}
+	logger.Info("using redis cache", "service", serviceName, "environment", cfg.Environment)
+	return store, func() {
+		if err := store.Close(); err != nil {
+			logger.Error("failed to close redis cache", "service", serviceName, "error", err)
+		}
+	}, nil
 }
 
 func startReadyConsumer(ctx context.Context, cfg config.Config, feedService *service.FeedService, logger *slog.Logger, metrics *observability.Metrics) func() {

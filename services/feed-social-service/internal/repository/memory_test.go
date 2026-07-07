@@ -130,6 +130,44 @@ func TestMemoryStoreCommentLifecycle(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreFollowLifecycle(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	follow, changed, err := store.SetFollow(context.Background(), FollowMutation{
+		FollowerID: "usr_viewer",
+		FolloweeID: "usr_creator",
+		Now:        now,
+	}, true)
+	if err != nil {
+		t.Fatalf("SetFollow() error = %v", err)
+	}
+	if !changed || follow.Status != domain.FollowStatusActive {
+		t.Fatalf("follow=%#v changed=%v", follow, changed)
+	}
+	follow, changed, err = store.SetFollow(context.Background(), FollowMutation{
+		FollowerID: "usr_viewer",
+		FolloweeID: "usr_creator",
+		Now:        now,
+	}, true)
+	if err != nil {
+		t.Fatalf("SetFollow(duplicate) error = %v", err)
+	}
+	if changed || follow.Status != domain.FollowStatusActive {
+		t.Fatalf("duplicate follow=%#v changed=%v", follow, changed)
+	}
+	follow, changed, err = store.SetFollow(context.Background(), FollowMutation{
+		FollowerID: "usr_viewer",
+		FolloweeID: "usr_creator",
+		Now:        now,
+	}, false)
+	if err != nil {
+		t.Fatalf("SetFollow(unfollow) error = %v", err)
+	}
+	if !changed || follow.Status != domain.FollowStatusDeleted {
+		t.Fatalf("unfollow=%#v changed=%v", follow, changed)
+	}
+}
+
 func insertFeedItem(t *testing.T, store *MemoryStore, input domain.ReadyVideoInput) {
 	t.Helper()
 	item, err := domain.NewFeedItemFromReadyVideo(input, input.ReadyAt)

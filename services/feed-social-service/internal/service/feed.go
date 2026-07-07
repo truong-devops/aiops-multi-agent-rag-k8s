@@ -2,13 +2,16 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/cache"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/domain"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/repository"
 )
@@ -20,6 +23,8 @@ type FeedService struct {
 	now          func() time.Time
 	defaultLimit int
 	maxLimit     int
+	cache        cache.Store
+	cacheTTL     time.Duration
 }
 
 type Options struct {
@@ -28,11 +33,14 @@ type Options struct {
 	Now          func() time.Time
 	DefaultLimit int
 	MaxLimit     int
+	Cache        cache.Store
+	CacheTTL     time.Duration
 }
 
 type MetricsRecorder interface {
 	RecordFeedOperation(operation string, outcome string)
 	RecordFeedResult(operation string, outcome string, count int)
+	RecordCacheOperation(operation string, outcome string, duration time.Duration)
 }
 
 type FeedQuery struct {
@@ -103,6 +111,14 @@ func NewFeedService(store repository.Store, options Options) *FeedService {
 	if defaultLimit > maxLimit {
 		defaultLimit = maxLimit
 	}
+	cacheStore := options.Cache
+	if cacheStore == nil {
+		cacheStore = cache.NewNoopStore()
+	}
+	cacheTTL := options.CacheTTL
+	if cacheTTL <= 0 {
+		cacheTTL = time.Minute
+	}
 	return &FeedService{
 		store:        store,
 		metrics:      options.Metrics,
@@ -110,6 +126,8 @@ func NewFeedService(store repository.Store, options Options) *FeedService {
 		now:          now,
 		defaultLimit: defaultLimit,
 		maxLimit:     maxLimit,
+		cache:        cacheStore,
+		cacheTTL:     cacheTTL,
 	}
 }
 
@@ -133,6 +151,10 @@ func (s *FeedService) ListFeed(ctx context.Context, query FeedQuery) (FeedPage, 
 		filter.BeforeReadyAt = &readyAt
 		filter.BeforeVideoID = videoID
 	}
+	cacheKey := feedCacheKey(limit, query.Cursor)
+	if page, ok := s.getCachedFeed(ctx, cacheKey); ok {
+		return FeedPage{Items: page.Items, Limit: page.Limit, NextCursor: page.NextCursor, HasMore: page.HasMore}, nil
+	}
 	items, err := s.store.ListFeedItems(ctx, filter)
 	if err != nil {
 		s.record("list_feed", "error")
@@ -148,12 +170,14 @@ func (s *FeedService) ListFeed(ctx context.Context, query FeedQuery) (FeedPage, 
 	}
 	s.record("list_feed", "success")
 	s.recordResult("list_feed", "success", len(items))
-	return FeedPage{
+	page := FeedPage{
 		Items:      items,
 		Limit:      limit,
 		NextCursor: nextCursor,
 		HasMore:    hasMore,
-	}, nil
+	}
+	s.setCachedFeed(ctx, cacheKey, cache.FeedPage(page))
+	return page, nil
 }
 
 func (s *FeedService) GetSocialCounters(ctx context.Context, videoID string) (domain.VideoSocialCounters, error) {
@@ -161,12 +185,16 @@ func (s *FeedService) GetSocialCounters(ctx context.Context, videoID string) (do
 	if videoID == "" {
 		return domain.VideoSocialCounters{}, domain.ValidationError("video_id is required.")
 	}
+	if counters, ok := s.getCachedCounters(ctx, videoID); ok {
+		return counters, nil
+	}
 	counters, err := s.store.GetSocialCounters(ctx, videoID)
 	if err != nil {
 		s.record("get_social_counters", "error")
 		return domain.VideoSocialCounters{}, err
 	}
 	s.record("get_social_counters", "success")
+	s.setCachedCounters(ctx, videoID, counters)
 	return counters, nil
 }
 
@@ -200,6 +228,7 @@ func (s *FeedService) CreateComment(ctx context.Context, input CreateCommentInpu
 		s.record("create_comment", "error")
 		return domain.Comment{}, domain.VideoSocialCounters{}, err
 	}
+	s.invalidateSocialCaches(ctx, created.VideoID)
 	s.record("create_comment", "created")
 	s.logger.Info(
 		"comment created",
@@ -274,10 +303,19 @@ func (s *FeedService) DeleteComment(ctx context.Context, commentID string, actor
 	}
 	if changed {
 		s.record("delete_comment", "deleted")
+		s.invalidateSocialCaches(ctx, comment.VideoID)
 	} else {
 		s.record("delete_comment", "noop")
 	}
 	return comment, counters, changed, nil
+}
+
+func (s *FeedService) FollowUser(ctx context.Context, followeeID string, actor Actor, requestID string, correlationID string) (domain.Follow, bool, error) {
+	return s.setFollow(ctx, followeeID, actor, requestID, correlationID, true)
+}
+
+func (s *FeedService) UnfollowUser(ctx context.Context, followeeID string, actor Actor, requestID string, correlationID string) (domain.Follow, bool, error) {
+	return s.setFollow(ctx, followeeID, actor, requestID, correlationID, false)
 }
 
 func (s *FeedService) UpsertReadyVideo(ctx context.Context, input domain.ReadyVideoInput) (domain.FeedItem, bool, error) {
@@ -293,6 +331,9 @@ func (s *FeedService) UpsertReadyVideo(ctx context.Context, input domain.ReadyVi
 	if err != nil {
 		s.record("upsert_ready_video", "error")
 		return domain.FeedItem{}, false, err
+	}
+	if created {
+		s.invalidateFeedCache(ctx)
 	}
 	if created {
 		s.record("upsert_ready_video", "created")
@@ -344,6 +385,10 @@ func (s *FeedService) setLike(ctx context.Context, videoID string, actor Actor, 
 		s.record("set_like", "error")
 		return domain.VideoSocialCounters{}, false, err
 	}
+	if changed {
+		s.invalidateSocialCaches(ctx, videoID)
+		s.setCachedCounters(ctx, videoID, counters)
+	}
 	outcome := "noop"
 	if changed && liked {
 		outcome = "liked"
@@ -352,6 +397,131 @@ func (s *FeedService) setLike(ctx context.Context, videoID string, actor Actor, 
 	}
 	s.record("set_like", outcome)
 	return counters, changed, nil
+}
+
+func (s *FeedService) getCachedFeed(ctx context.Context, key string) (cache.FeedPage, bool) {
+	startedAt := s.now()
+	page, ok, err := s.cache.GetFeed(ctx, key)
+	if err != nil {
+		s.recordCache("feed_get", "error", startedAt)
+		s.logger.Warn("feed cache read failed", "service", "feed-social-service", "error", err)
+		return cache.FeedPage{}, false
+	}
+	if ok {
+		s.recordCache("feed_get", "hit", startedAt)
+		return page, true
+	}
+	s.recordCache("feed_get", "miss", startedAt)
+	return cache.FeedPage{}, false
+}
+
+func (s *FeedService) setCachedFeed(ctx context.Context, key string, page cache.FeedPage) {
+	startedAt := s.now()
+	if err := s.cache.SetFeed(ctx, key, page, s.cacheTTL); err != nil {
+		s.recordCache("feed_set", "error", startedAt)
+		s.logger.Warn("feed cache write failed", "service", "feed-social-service", "error", err)
+		return
+	}
+	s.recordCache("feed_set", "success", startedAt)
+}
+
+func (s *FeedService) getCachedCounters(ctx context.Context, videoID string) (domain.VideoSocialCounters, bool) {
+	startedAt := s.now()
+	counters, ok, err := s.cache.GetCounters(ctx, videoID)
+	if err != nil {
+		s.recordCache("counters_get", "error", startedAt)
+		s.logger.Warn("counters cache read failed", "service", "feed-social-service", "video_id", videoID, "error", err)
+		return domain.VideoSocialCounters{}, false
+	}
+	if ok {
+		s.recordCache("counters_get", "hit", startedAt)
+		return counters, true
+	}
+	s.recordCache("counters_get", "miss", startedAt)
+	return domain.VideoSocialCounters{}, false
+}
+
+func (s *FeedService) setCachedCounters(ctx context.Context, videoID string, counters domain.VideoSocialCounters) {
+	startedAt := s.now()
+	if err := s.cache.SetCounters(ctx, videoID, counters, s.cacheTTL); err != nil {
+		s.recordCache("counters_set", "error", startedAt)
+		s.logger.Warn("counters cache write failed", "service", "feed-social-service", "video_id", videoID, "error", err)
+		return
+	}
+	s.recordCache("counters_set", "success", startedAt)
+}
+
+func (s *FeedService) invalidateSocialCaches(ctx context.Context, videoID string) {
+	s.invalidateFeedCache(ctx)
+	startedAt := s.now()
+	if err := s.cache.InvalidateCounters(ctx, videoID); err != nil {
+		s.recordCache("counters_invalidate", "error", startedAt)
+		s.logger.Warn("counters cache invalidation failed", "service", "feed-social-service", "video_id", videoID, "error", err)
+		return
+	}
+	s.recordCache("counters_invalidate", "success", startedAt)
+}
+
+func (s *FeedService) invalidateFeedCache(ctx context.Context) {
+	startedAt := s.now()
+	if err := s.cache.InvalidateFeed(ctx); err != nil {
+		s.recordCache("feed_invalidate", "error", startedAt)
+		s.logger.Warn("feed cache invalidation failed", "service", "feed-social-service", "error", err)
+		return
+	}
+	s.recordCache("feed_invalidate", "success", startedAt)
+}
+
+func (s *FeedService) recordCache(operation string, outcome string, startedAt time.Time) {
+	if s.metrics != nil {
+		s.metrics.RecordCacheOperation(operation, outcome, s.now().Sub(startedAt))
+	}
+}
+
+func feedCacheKey(limit int, cursor string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(cursor)))
+	return strings.TrimSpace(hex.EncodeToString(sum[:])) + ":" + strings.TrimSpace(jsonNumber(limit))
+}
+
+func jsonNumber(value int) string {
+	raw, _ := json.Marshal(value)
+	return string(raw)
+}
+
+func (s *FeedService) setFollow(ctx context.Context, followeeID string, actor Actor, requestID string, correlationID string, following bool) (domain.Follow, bool, error) {
+	actor, err := requireActor(actor)
+	if err != nil {
+		s.record("set_follow", "unauthorized")
+		return domain.Follow{}, false, err
+	}
+	followeeID = strings.TrimSpace(followeeID)
+	if followeeID == "" {
+		s.record("set_follow", "invalid")
+		return domain.Follow{}, false, domain.ValidationError("followee user_id is required.")
+	}
+	if followeeID == actor.UserID {
+		s.record("set_follow", "self_follow")
+		return domain.Follow{}, false, domain.ValidationError("user cannot follow themselves.")
+	}
+	follow, changed, err := s.store.SetFollow(ctx, repository.FollowMutation{
+		FollowerID:    actor.UserID,
+		FolloweeID:    followeeID,
+		RequestID:     strings.TrimSpace(requestID),
+		CorrelationID: strings.TrimSpace(correlationID),
+		Now:           s.now().UTC(),
+	}, following)
+	if err != nil {
+		s.record("set_follow", "error")
+		return domain.Follow{}, false, err
+	}
+	outcome := "noop"
+	if changed && following {
+		outcome = "followed"
+	} else if changed {
+		outcome = "unfollowed"
+	}
+	s.record("set_follow", outcome)
+	return follow, changed, nil
 }
 
 func requireActor(actor Actor) (Actor, error) {

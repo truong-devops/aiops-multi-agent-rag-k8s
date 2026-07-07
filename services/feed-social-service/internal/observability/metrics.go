@@ -10,15 +10,17 @@ import (
 )
 
 type Metrics struct {
-	mu             sync.Mutex
-	requests       map[httpMetricKey]uint64
-	requestLatency map[httpMetricKey]time.Duration
-	dbOperations   map[operationMetricKey]uint64
-	dbLatency      map[operationMetricKey]time.Duration
-	feedOperations map[operationMetricKey]uint64
-	feedResults    map[operationMetricKey]uint64
-	eventAge       map[operationMetricKey]time.Duration
-	eventAgeCount  map[operationMetricKey]uint64
+	mu              sync.Mutex
+	requests        map[httpMetricKey]uint64
+	requestLatency  map[httpMetricKey]time.Duration
+	dbOperations    map[operationMetricKey]uint64
+	dbLatency       map[operationMetricKey]time.Duration
+	feedOperations  map[operationMetricKey]uint64
+	feedResults     map[operationMetricKey]uint64
+	eventAge        map[operationMetricKey]time.Duration
+	eventAgeCount   map[operationMetricKey]uint64
+	cacheOperations map[operationMetricKey]uint64
+	cacheLatency    map[operationMetricKey]time.Duration
 }
 
 type httpMetricKey struct {
@@ -33,14 +35,16 @@ type operationMetricKey struct {
 
 func NewMetrics() *Metrics {
 	return &Metrics{
-		requests:       map[httpMetricKey]uint64{},
-		requestLatency: map[httpMetricKey]time.Duration{},
-		dbOperations:   map[operationMetricKey]uint64{},
-		dbLatency:      map[operationMetricKey]time.Duration{},
-		feedOperations: map[operationMetricKey]uint64{},
-		feedResults:    map[operationMetricKey]uint64{},
-		eventAge:       map[operationMetricKey]time.Duration{},
-		eventAgeCount:  map[operationMetricKey]uint64{},
+		requests:        map[httpMetricKey]uint64{},
+		requestLatency:  map[httpMetricKey]time.Duration{},
+		dbOperations:    map[operationMetricKey]uint64{},
+		dbLatency:       map[operationMetricKey]time.Duration{},
+		feedOperations:  map[operationMetricKey]uint64{},
+		feedResults:     map[operationMetricKey]uint64{},
+		eventAge:        map[operationMetricKey]time.Duration{},
+		eventAgeCount:   map[operationMetricKey]uint64{},
+		cacheOperations: map[operationMetricKey]uint64{},
+		cacheLatency:    map[operationMetricKey]time.Duration{},
 	}
 }
 
@@ -97,6 +101,14 @@ func (m *Metrics) RecordEventAge(source string, outcome string, age time.Duratio
 	m.eventAgeCount[key]++
 }
 
+func (m *Metrics) RecordCacheOperation(operation string, outcome string, duration time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := operationMetricKey{Operation: normalizeLabel(operation, "unknown"), Outcome: normalizeLabel(outcome, "unknown")}
+	m.cacheOperations[key]++
+	m.cacheLatency[key] += duration
+}
+
 func (m *Metrics) Handler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -136,6 +148,13 @@ func (m *Metrics) writePrometheus(w http.ResponseWriter) {
 	for _, key := range eventAgeKeys {
 		eventAge[key] = m.eventAge[key]
 		eventAgeCount[key] = m.eventAgeCount[key]
+	}
+	cacheKeys := sortedOperationKeys(m.cacheOperations)
+	cacheOperations := make(map[operationMetricKey]uint64, len(m.cacheOperations))
+	cacheLatency := make(map[operationMetricKey]time.Duration, len(m.cacheLatency))
+	for _, key := range cacheKeys {
+		cacheOperations[key] = m.cacheOperations[key]
+		cacheLatency[key] = m.cacheLatency[key]
 	}
 	m.mu.Unlock()
 
@@ -185,6 +204,18 @@ func (m *Metrics) writePrometheus(w http.ResponseWriter) {
 	_, _ = fmt.Fprintln(w, "# TYPE feed_social_event_age_observations_total counter")
 	for _, key := range eventAgeKeys {
 		_, _ = fmt.Fprintf(w, "feed_social_event_age_observations_total{source=%q,outcome=%q} %d\n", key.Operation, key.Outcome, eventAgeCount[key])
+	}
+
+	_, _ = fmt.Fprintln(w, "# HELP feed_social_cache_operations_total Cache operations by operation and outcome.")
+	_, _ = fmt.Fprintln(w, "# TYPE feed_social_cache_operations_total counter")
+	for _, key := range cacheKeys {
+		_, _ = fmt.Fprintf(w, "feed_social_cache_operations_total{operation=%q,outcome=%q} %d\n", key.Operation, key.Outcome, cacheOperations[key])
+	}
+
+	_, _ = fmt.Fprintln(w, "# HELP feed_social_cache_operation_duration_seconds_total Total cache operation duration by operation and outcome.")
+	_, _ = fmt.Fprintln(w, "# TYPE feed_social_cache_operation_duration_seconds_total counter")
+	for _, key := range cacheKeys {
+		_, _ = fmt.Fprintf(w, "feed_social_cache_operation_duration_seconds_total{operation=%q,outcome=%q} %.6f\n", key.Operation, key.Outcome, cacheLatency[key].Seconds())
 	}
 }
 

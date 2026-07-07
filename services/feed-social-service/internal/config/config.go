@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -18,6 +19,9 @@ type Config struct {
 	ConsumerGroup         string
 	ConsumerEnabled       bool
 	InternalAPIToken      string
+	RedisURL              string
+	CacheEnabled          bool
+	FeedCacheTTL          time.Duration
 	RequestBodyLimitBytes int64
 	FeedDefaultLimit      int
 	FeedMaxLimit          int
@@ -34,6 +38,9 @@ func Load() (Config, error) {
 		ConsumerGroup:         getenv("CONSUMER_GROUP", "feed-social-service"),
 		ConsumerEnabled:       parseBool(getenv("CONSUMER_ENABLED", "false")),
 		InternalAPIToken:      strings.TrimSpace(os.Getenv("INTERNAL_API_TOKEN")),
+		RedisURL:              strings.TrimSpace(os.Getenv("REDIS_URL")),
+		CacheEnabled:          parseBool(getenv("CACHE_ENABLED", "false")),
+		FeedCacheTTL:          parseDuration(getenv("FEED_CACHE_TTL", "60s"), time.Minute),
 		RequestBodyLimitBytes: parseInt64(getenv("REQUEST_BODY_LIMIT_BYTES", "1048576"), 1048576),
 		FeedDefaultLimit:      parseInt(getenv("FEED_DEFAULT_LIMIT", "20"), 20),
 		FeedMaxLimit:          parseInt(getenv("FEED_MAX_LIMIT", "50"), 50),
@@ -72,6 +79,14 @@ func (c Config) Validate() error {
 		}
 		if strings.TrimSpace(c.ConsumerGroup) == "" {
 			return fmt.Errorf("CONSUMER_GROUP is required when CONSUMER_ENABLED=true")
+		}
+	}
+	if c.CacheEnabled {
+		if strings.TrimSpace(c.RedisURL) == "" {
+			return fmt.Errorf("REDIS_URL is required when CACHE_ENABLED=true")
+		}
+		if c.FeedCacheTTL <= 0 {
+			return fmt.Errorf("FEED_CACHE_TTL must be positive when CACHE_ENABLED=true")
 		}
 	}
 	return nil
@@ -126,6 +141,14 @@ func parseBool(value string) bool {
 	default:
 		return false
 	}
+}
+
+func parseDuration(value string, fallback time.Duration) time.Duration {
+	parsed, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
 func parseCSV(value string) []string {

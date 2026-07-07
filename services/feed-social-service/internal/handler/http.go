@@ -24,6 +24,8 @@ type FeedService interface {
 	CreateComment(ctx context.Context, input service.CreateCommentInput) (domain.Comment, domain.VideoSocialCounters, error)
 	ListComments(ctx context.Context, query service.CommentQuery) (service.CommentPage, error)
 	DeleteComment(ctx context.Context, commentID string, actor service.Actor) (domain.Comment, domain.VideoSocialCounters, bool, error)
+	FollowUser(ctx context.Context, followeeID string, actor service.Actor, requestID string, correlationID string) (domain.Follow, bool, error)
+	UnfollowUser(ctx context.Context, followeeID string, actor service.Actor, requestID string, correlationID string) (domain.Follow, bool, error)
 	UpsertReadyVideo(ctx context.Context, input domain.ReadyVideoInput) (domain.FeedItem, bool, error)
 }
 
@@ -50,6 +52,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, metrics http.HandlerFunc) {
 	mux.HandleFunc("/v1/feed", h.listFeed)
 	mux.HandleFunc("/v1/videos/", h.videoResource)
 	mux.HandleFunc("/v1/comments/", h.commentResource)
+	mux.HandleFunc("/v1/users/", h.userResource)
 	mux.HandleFunc("/v1/internal/feed-items", h.ingestFeedItem)
 	if metrics != nil {
 		mux.HandleFunc("/metrics", metrics)
@@ -166,6 +169,43 @@ func (h *Handler) commentResource(w http.ResponseWriter, req *http.Request) {
 		Counters:  socialResponse(counters),
 		Deleted:   deleted,
 		RequestID: observability.RequestIDFromContext(req.Context()),
+	})
+}
+
+func (h *Handler) userResource(w http.ResponseWriter, req *http.Request) {
+	userID, resource, ok := parseNestedResource(req.URL.Path, "/v1/users/")
+	if !ok || resource != "follow" {
+		h.notFound(w, req)
+		return
+	}
+	actor := actorFromRequest(req)
+	requestID := observability.RequestIDFromContext(req.Context())
+	correlationID := observability.CorrelationIDFromContext(req.Context())
+	var (
+		follow  domain.Follow
+		changed bool
+		err     error
+		active  bool
+	)
+	switch req.Method {
+	case http.MethodPut:
+		follow, changed, err = h.service.FollowUser(req.Context(), userID, actor, requestID, correlationID)
+		active = true
+	case http.MethodDelete:
+		follow, changed, err = h.service.UnfollowUser(req.Context(), userID, actor, requestID, correlationID)
+	default:
+		writeError(w, req, domain.NewError(http.StatusMethodNotAllowed, domain.CodeMethodNotAllowed, "HTTP method is not allowed for this route."))
+		return
+	}
+	if err != nil {
+		writeError(w, req, err)
+		return
+	}
+	writeRawJSON(w, http.StatusOK, followEnvelope{
+		Data:      followResponse(follow),
+		Following: active,
+		Changed:   changed,
+		RequestID: requestID,
 	})
 }
 
@@ -387,6 +427,17 @@ func socialResponse(counters domain.VideoSocialCounters) socialBody {
 	}
 }
 
+func followResponse(follow domain.Follow) followBody {
+	return followBody{
+		ID:         follow.ID,
+		FollowerID: follow.FollowerID,
+		FolloweeID: follow.FolloweeID,
+		Status:     follow.Status,
+		CreatedAt:  follow.CreatedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt:  follow.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	}
+}
+
 func actorFromRequest(req *http.Request) service.Actor {
 	return service.Actor{
 		UserID: strings.TrimSpace(req.Header.Get("X-User-ID")),
@@ -470,6 +521,13 @@ type deleteCommentEnvelope struct {
 	RequestID string      `json:"request_id,omitempty"`
 }
 
+type followEnvelope struct {
+	Data      followBody `json:"data"`
+	Following bool       `json:"following"`
+	Changed   bool       `json:"changed"`
+	RequestID string     `json:"request_id,omitempty"`
+}
+
 type feedItemBody struct {
 	VideoID            string    `json:"video_id"`
 	Owner              ownerBody `json:"owner"`
@@ -498,6 +556,15 @@ type commentBody struct {
 	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+}
+
+type followBody struct {
+	ID         string `json:"id"`
+	FollowerID string `json:"follower_id"`
+	FolloweeID string `json:"followee_id"`
+	Status     string `json:"status"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }
 
 type ownerBody struct {

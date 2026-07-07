@@ -16,6 +16,7 @@ type MemoryStore struct {
 	counters    map[string]domain.VideoSocialCounters
 	likes       map[string]domain.Like
 	comments    map[string]domain.Comment
+	follows     map[string]domain.Follow
 	inboxEvents map[string]domain.InboxEvent
 }
 
@@ -25,6 +26,7 @@ func NewMemoryStore() *MemoryStore {
 		counters:    map[string]domain.VideoSocialCounters{},
 		likes:       map[string]domain.Like{},
 		comments:    map[string]domain.Comment{},
+		follows:     map[string]domain.Follow{},
 		inboxEvents: map[string]domain.InboxEvent{},
 	}
 }
@@ -242,6 +244,61 @@ func (s *MemoryStore) DeleteComment(_ context.Context, commentID string, actorID
 	return comment, counter, true, nil
 }
 
+func (s *MemoryStore) SetFollow(_ context.Context, mutation FollowMutation, following bool) (domain.Follow, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := mutation.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	key := followKey(mutation.FollowerID, mutation.FolloweeID)
+	existing, exists := s.follows[key]
+	changed := false
+	if following {
+		if !exists {
+			existing = domain.Follow{
+				ID:            domain.NewID("follow"),
+				FollowerID:    strings.TrimSpace(mutation.FollowerID),
+				FolloweeID:    strings.TrimSpace(mutation.FolloweeID),
+				Status:        domain.FollowStatusActive,
+				RequestID:     mutation.RequestID,
+				CorrelationID: mutation.CorrelationID,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			}
+			changed = true
+		} else if existing.Status != domain.FollowStatusActive {
+			existing.Status = domain.FollowStatusActive
+			existing.RequestID = mutation.RequestID
+			existing.CorrelationID = mutation.CorrelationID
+			existing.UpdatedAt = now
+			changed = true
+		}
+		s.follows[key] = existing
+		return existing, changed, nil
+	}
+	if exists && existing.Status == domain.FollowStatusActive {
+		existing.Status = domain.FollowStatusDeleted
+		existing.RequestID = mutation.RequestID
+		existing.CorrelationID = mutation.CorrelationID
+		existing.UpdatedAt = now
+		s.follows[key] = existing
+		changed = true
+		return existing, changed, nil
+	}
+	if !exists {
+		existing = domain.Follow{
+			ID:         domain.NewID("follow"),
+			FollowerID: strings.TrimSpace(mutation.FollowerID),
+			FolloweeID: strings.TrimSpace(mutation.FolloweeID),
+			Status:     domain.FollowStatusDeleted,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+	}
+	return existing, false, nil
+}
+
 func (s *MemoryStore) Ping(context.Context) error {
 	return nil
 }
@@ -280,6 +337,10 @@ func (s *MemoryStore) ensureActiveFeedItemLocked(videoID string) error {
 
 func likeKey(videoID string, userID string) string {
 	return strings.TrimSpace(videoID) + ":" + strings.TrimSpace(userID)
+}
+
+func followKey(followerID string, followeeID string) string {
+	return strings.TrimSpace(followerID) + ":" + strings.TrimSpace(followeeID)
 }
 
 func commentBeforeCursor(comment domain.Comment, beforeCreatedAt time.Time, beforeCommentID string) bool {

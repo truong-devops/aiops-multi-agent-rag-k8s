@@ -263,6 +263,45 @@ func TestCommentLifecycle(t *testing.T) {
 	}
 }
 
+func TestFollowLifecycle(t *testing.T) {
+	app, _ := newFeedTestApp(t, testOptions{})
+	req := httptest.NewRequest(http.MethodPut, "/v1/users/usr_creator/follow", nil)
+	req.Header.Set("X-User-ID", "usr_viewer")
+	rec := httptest.NewRecorder()
+	app.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("follow status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var followed followEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &followed); err != nil {
+		t.Fatalf("decode follow response: %v", err)
+	}
+	if !followed.Following || !followed.Changed || followed.Data.FolloweeID != "usr_creator" {
+		t.Fatalf("followed = %#v", followed)
+	}
+
+	unfollowReq := httptest.NewRequest(http.MethodDelete, "/v1/users/usr_creator/follow", nil)
+	unfollowReq.Header.Set("X-User-ID", "usr_viewer")
+	unfollowRec := httptest.NewRecorder()
+	app.ServeHTTP(unfollowRec, unfollowReq)
+	if unfollowRec.Code != http.StatusOK {
+		t.Fatalf("unfollow status = %d, body = %s", unfollowRec.Code, unfollowRec.Body.String())
+	}
+}
+
+func TestFollowRejectsSelfFollow(t *testing.T) {
+	app, _ := newFeedTestApp(t, testOptions{})
+	req := httptest.NewRequest(http.MethodPut, "/v1/users/usr_viewer/follow", nil)
+	req.Header.Set("X-User-ID", "usr_viewer")
+	rec := httptest.NewRecorder()
+
+	app.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func newTestApp(readyErr error) http.Handler {
 	if readyErr == nil {
 		app, _ := newFeedTestApp(nil, testOptions{})
@@ -351,6 +390,14 @@ func (s stubReady) ListComments(context.Context, service.CommentQuery) (service.
 
 func (s stubReady) DeleteComment(context.Context, string, service.Actor) (domain.Comment, domain.VideoSocialCounters, bool, error) {
 	return domain.Comment{}, domain.VideoSocialCounters{}, false, s.err
+}
+
+func (s stubReady) FollowUser(context.Context, string, service.Actor, string, string) (domain.Follow, bool, error) {
+	return domain.Follow{}, false, s.err
+}
+
+func (s stubReady) UnfollowUser(context.Context, string, service.Actor, string, string) (domain.Follow, bool, error) {
+	return domain.Follow{}, false, s.err
 }
 
 func (s stubReady) UpsertReadyVideo(context.Context, domain.ReadyVideoInput) (domain.FeedItem, bool, error) {

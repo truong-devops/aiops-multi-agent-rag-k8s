@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/cache"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/domain"
 	"github.com/truong-devops/aiops-multiagent-rag-k8s/services/feed-social-service/internal/repository"
 )
@@ -91,11 +93,79 @@ func TestCommentServiceLifecycle(t *testing.T) {
 	}
 }
 
+func TestFollowServiceLifecycle(t *testing.T) {
+	svc := NewFeedService(repository.NewMemoryStore(), Options{})
+	if _, _, err := svc.FollowUser(context.Background(), "usr_creator", Actor{}, "req_1", "corr_1"); err == nil {
+		t.Fatal("FollowUser() error = nil, want actor error")
+	}
+	if _, _, err := svc.FollowUser(context.Background(), "usr_viewer", Actor{UserID: "usr_viewer"}, "req_1", "corr_1"); err == nil {
+		t.Fatal("FollowUser(self) error = nil, want validation error")
+	}
+	follow, changed, err := svc.FollowUser(context.Background(), "usr_creator", Actor{UserID: "usr_viewer"}, "req_1", "corr_1")
+	if err != nil {
+		t.Fatalf("FollowUser() error = %v", err)
+	}
+	if !changed || follow.Status != domain.FollowStatusActive {
+		t.Fatalf("follow=%#v changed=%v", follow, changed)
+	}
+	follow, changed, err = svc.UnfollowUser(context.Background(), "usr_creator", Actor{UserID: "usr_viewer"}, "req_2", "corr_2")
+	if err != nil {
+		t.Fatalf("UnfollowUser() error = %v", err)
+	}
+	if !changed || follow.Status != domain.FollowStatusDeleted {
+		t.Fatalf("unfollow=%#v changed=%v", follow, changed)
+	}
+}
+
+func TestListFeedFallsBackWhenCacheFails(t *testing.T) {
+	svc := NewFeedService(repository.NewMemoryStore(), Options{Cache: failingCache{}, DefaultLimit: 2, MaxLimit: 2})
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	upsertReady(t, svc, readyInput("evt_cache_service", "vid_cache_service", "public", now))
+
+	page, err := svc.ListFeed(context.Background(), FeedQuery{})
+	if err != nil {
+		t.Fatalf("ListFeed() error = %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Item.VideoID != "vid_cache_service" {
+		t.Fatalf("page=%#v", page)
+	}
+}
+
 func upsertReady(t *testing.T, svc *FeedService, input domain.ReadyVideoInput) {
 	t.Helper()
 	if _, _, err := svc.UpsertReadyVideo(context.Background(), input); err != nil {
 		t.Fatalf("UpsertReadyVideo() error = %v", err)
 	}
+}
+
+type failingCache struct{}
+
+func (failingCache) GetFeed(context.Context, string) (cache.FeedPage, bool, error) {
+	return cache.FeedPage{}, false, errors.New("cache down")
+}
+
+func (failingCache) SetFeed(context.Context, string, cache.FeedPage, time.Duration) error {
+	return errors.New("cache down")
+}
+
+func (failingCache) InvalidateFeed(context.Context) error {
+	return errors.New("cache down")
+}
+
+func (failingCache) GetCounters(context.Context, string) (domain.VideoSocialCounters, bool, error) {
+	return domain.VideoSocialCounters{}, false, errors.New("cache down")
+}
+
+func (failingCache) SetCounters(context.Context, string, domain.VideoSocialCounters, time.Duration) error {
+	return errors.New("cache down")
+}
+
+func (failingCache) InvalidateCounters(context.Context, string) error {
+	return errors.New("cache down")
+}
+
+func (failingCache) Close() error {
+	return nil
 }
 
 func readyInput(eventID string, videoID string, visibility string, readyAt time.Time) domain.ReadyVideoInput {

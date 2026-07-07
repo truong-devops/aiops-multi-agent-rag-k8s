@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 func TestValidateAllowsLocalWithoutDatabase(t *testing.T) {
@@ -54,6 +55,26 @@ func TestValidateAllowsConsumerWithKafkaConfig(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresRedisURLWhenCacheEnabled(t *testing.T) {
+	cfg := validConfig("local")
+	cfg.CacheEnabled = true
+	cfg.RedisURL = ""
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing Redis URL error")
+	}
+}
+
+func TestValidateAllowsCacheWithRedisURL(t *testing.T) {
+	cfg := validConfig("local")
+	cfg.CacheEnabled = true
+	cfg.RedisURL = "redis://localhost:6379/0"
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func validConfig(environment string) Config {
 	return Config{
 		Port:                  "8080",
@@ -61,6 +82,7 @@ func validConfig(environment string) Config {
 		DatabaseURL:           "postgres://feed:feed@postgres:5432/feed_social_db?sslmode=disable",
 		VideoEventsTopic:      "video-events",
 		ConsumerGroup:         "feed-social-service",
+		FeedCacheTTL:          time.Minute,
 		RequestBodyLimitBytes: 1048576,
 		FeedDefaultLimit:      20,
 		FeedMaxLimit:          50,

@@ -77,6 +77,13 @@ func (s InstrumentedStore) DeleteComment(ctx context.Context, commentID string, 
 	return out, counters, changed, err
 }
 
+func (s InstrumentedStore) SetFollow(ctx context.Context, mutation FollowMutation, following bool) (domain.Follow, bool, error) {
+	startedAt := s.now()
+	out, changed, err := s.next.SetFollow(ctx, mutation, following)
+	s.record("set_follow", err, startedAt)
+	return out, changed, err
+}
+
 func (s InstrumentedStore) Ping(ctx context.Context) error {
 	startedAt := s.now()
 	err := s.next.Ping(ctx)

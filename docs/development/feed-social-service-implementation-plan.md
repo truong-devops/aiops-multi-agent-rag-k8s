@@ -185,7 +185,7 @@ PostgreSQL tables owned by `feed-social-service`:
 
 - `[x]` `feed_items` for MVP read model if keeping dependencies small.
 - `[x]` `likes`
-- `[ ]` `follows`
+- `[x]` `follows`
 - `[x]` `comments` for PostgreSQL MVP comments.
 - `[x]` `video_social_counters`
 - `[x]` `inbox_events` for event idempotency.
@@ -199,8 +199,8 @@ MongoDB collections owned by `feed-social-service`:
 Redis planned keys:
 
 - `[ ]` `feed:home:{user_id}`
-- `[ ]` `feed:guest`
-- `[ ]` `feed:video:{video_id}:counters`
+- `[x]` `feed:guest`
+- `[x]` `feed:video:{video_id}:counters`
 - `[ ]` `feed:dedup:like:{video_id}:{user_id}`
 - `[ ]` `feed:event:{event_id}`
 
@@ -208,7 +208,7 @@ Storage choice for first implementation:
 
 - Prefer PostgreSQL-only MVP for `feed_items`, `likes`, `comments`, `follows`, and `video_social_counters`.
 - Add MongoDB comments later only if comments need flexible nesting/read models.
-- Add Redis after durable behavior and metrics are stable.
+- Add Redis after durable behavior and metrics are stable. Current implementation has optional Redis cache for guest feed and social counters.
 
 ## API Surface
 
@@ -224,8 +224,8 @@ Direct service routes:
 - `[x]` `GET /v1/videos/{video_id}/comments?limit=&cursor=`
 - `[x]` `POST /v1/videos/{video_id}/comments`
 - `[x]` `DELETE /v1/comments/{comment_id}`
-- `[ ]` `PUT /v1/users/{user_id}/follow`
-- `[ ]` `DELETE /v1/users/{user_id}/follow`
+- `[x]` `PUT /v1/users/{user_id}/follow`
+- `[x]` `DELETE /v1/users/{user_id}/follow`
 - `[x]` Optional `POST /v1/internal/feed-items` for controlled MVP ingestion if `video.ready.v1` is not available yet.
 
 Public clients should call through `api-gateway`:
@@ -294,7 +294,7 @@ Required or planned env vars:
 - `[x]` `DATABASE_URL`
 - `[ ]` `MONGODB_URI`
 - `[ ]` `MONGODB_DATABASE`
-- `[ ]` `REDIS_URL`
+- `[x]` `REDIS_URL`
 - `[x]` `KAFKA_BROKERS`
 - `[x]` `VIDEO_EVENTS_TOPIC`
 - `[ ]` `SOCIAL_EVENTS_TOPIC`
@@ -305,8 +305,8 @@ Required or planned env vars:
 - `[x]` `REQUEST_BODY_LIMIT_BYTES`
 - `[x]` `FEED_DEFAULT_LIMIT`
 - `[x]` `FEED_MAX_LIMIT`
-- `[ ]` `CACHE_ENABLED`
-- `[ ]` `FEED_CACHE_TTL`
+- `[x]` `CACHE_ENABLED`
+- `[x]` `FEED_CACHE_TTL`
 
 Validation rules:
 
@@ -428,13 +428,13 @@ Done criteria:
 
 ## Phase 7: Follows
 
-- `[ ]` Add `follows` table.
-- `[ ]` Add idempotent `PUT /v1/users/{user_id}/follow`.
-- `[ ]` Add idempotent `DELETE /v1/users/{user_id}/follow`.
-- `[ ]` Reject following yourself.
-- `[ ]` Require trusted user context.
+- `[x]` Add `follows` table.
+- `[x]` Add idempotent `PUT /v1/users/{user_id}/follow`.
+- `[x]` Add idempotent `DELETE /v1/users/{user_id}/follow`.
+- `[x]` Reject following yourself.
+- `[x]` Require trusted user context.
 - `[ ]` Add optional `user.followed.v1` / `user.unfollowed.v1` outbox contract.
-- `[ ]` Add tests for follow/unfollow/self-follow.
+- `[x]` Add tests for follow/unfollow/self-follow.
 
 Done criteria:
 
@@ -444,13 +444,13 @@ Done criteria:
 
 ## Phase 8: Cache And Performance
 
-- `[ ]` Add Redis client only after durable feed behavior works.
-- `[ ]` Add cache interface with no-op local implementation.
-- `[ ]` Cache public/guest feed with short TTL.
-- `[ ]` Cache hot social counters with short TTL.
-- `[ ]` Add cache invalidation on feed item/social write.
-- `[ ]` Add metrics for cache hit, miss, bypass, error and latency.
-- `[ ]` Add tests for cache fallback when Redis is unavailable.
+- `[x]` Add Redis client only after durable feed behavior works.
+- `[x]` Add cache interface with no-op local implementation.
+- `[x]` Cache public/guest feed with short TTL.
+- `[x]` Cache hot social counters with short TTL.
+- `[x]` Add cache invalidation on feed item/social write.
+- `[x]` Add metrics for cache hit, miss, bypass, error and latency.
+- `[x]` Add tests for cache fallback when Redis is unavailable.
 
 Done criteria:
 
@@ -464,7 +464,7 @@ Done criteria:
 - `[~]` Add feed list latency and result count metrics.
 - `[x]` Add ingestion event age and failure metrics.
 - `[x]` Add DB operation latency/error metrics.
-- `[ ]` Add Redis cache metrics when cache exists.
+- `[x]` Add Redis cache metrics when cache exists.
 - `[ ]` Add MongoDB operation metrics when comments/read model use MongoDB.
 - `[~]` Add structured logs with `service`, `environment`, `request_id`, `correlation_id`, `user_id`, `video_id`, `comment_id`, `event_id`, `error_code`.
 - `[ ]` Add optional OpenTelemetry trace propagation.
@@ -493,10 +493,10 @@ Done criteria:
 
 Next best engineering task:
 
-1. Add Phase 7 follows.
-2. Decide whether optional social outbox events are needed before cache.
-3. Add cache only after durable feed/social behavior is stable.
-4. Add local compose smoke test for ready video ingestion to feed listing plus like/comment.
+1. Add local compose smoke test for ready video ingestion to feed listing plus like/comment/follow.
+2. Decide whether optional social outbox events are needed.
+3. Add Kubernetes/GitOps manifests and resource sizing for product services.
+4. Move to `live-service` if the product flow is enough for the first demo.
 
 Reason:
 

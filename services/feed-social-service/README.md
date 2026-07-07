@@ -30,13 +30,14 @@ Da co:
 - Controlled internal ingestion API `POST /v1/internal/feed-items` duoc bao ve bang `X-Internal-Token`.
 - Likes idempotent voi durable `like_count`.
 - PostgreSQL comments MVP voi create/list/delete va durable `comment_count`.
-- Metrics cho feed operations, item count va event age.
+- Follows idempotent voi PostgreSQL `follows`.
+- Optional Redis cache cho guest feed va social counters, fail-open khi Redis loi.
+- Metrics cho feed operations, item count, event age va cache hit/miss/error.
 - Unit tests va skipped-by-default PostgreSQL integration harness.
 
 Chua co:
 
-- Follows.
-- Redis cache va MongoDB comments/read model.
+- MongoDB comments/read model.
 
 ## API
 
@@ -52,15 +53,12 @@ Current direct service routes:
 - `GET /v1/videos/{video_id}/comments?limit=&cursor=`
 - `POST /v1/videos/{video_id}/comments`
 - `DELETE /v1/comments/{comment_id}`
-- `POST /v1/internal/feed-items`
-
-Planned direct service routes:
-
 - `PUT /v1/users/{user_id}/follow`
 - `DELETE /v1/users/{user_id}/follow`
+- `POST /v1/internal/feed-items`
 
 Public clients should call through `api-gateway` under `/api/v1/*`.
-Write routes for likes/comments require trusted `X-User-ID` from `api-gateway`.
+Write routes for likes/comments/follows require trusted `X-User-ID` from `api-gateway`.
 
 ## Configuration
 
@@ -75,6 +73,9 @@ Write routes for likes/comments require trusted `X-User-ID` from `api-gateway`.
 | `CONSUMER_GROUP` | `feed-social-service` | when consumer enabled | Kafka consumer group. |
 | `CONSUMER_ENABLED` | `false` | no | Enables ready-video event consumer. |
 | `INTERNAL_API_TOKEN` | empty | for internal ingestion | Required by `POST /v1/internal/feed-items`. |
+| `REDIS_URL` | empty | when cache enabled | Redis URL used by optional feed/social cache. |
+| `CACHE_ENABLED` | `false` | no | Enables Redis cache. |
+| `FEED_CACHE_TTL` | `60s` | when cache enabled | TTL for feed and social counter cache entries. |
 | `REQUEST_BODY_LIMIT_BYTES` | `1048576` | no | Request body cap for future write APIs. |
 | `FEED_DEFAULT_LIMIT` | `20` | no | Default page size for feed API. |
 | `FEED_MAX_LIMIT` | `50` | no | Maximum page size for feed API. |
@@ -82,7 +83,6 @@ Write routes for likes/comments require trusted `X-User-ID` from `api-gateway`.
 Planned env vars for later phases:
 
 - `SOCIAL_EVENTS_TOPIC`
-- `REDIS_URL`
 - `MONGODB_URI`
 - `MONGODB_DATABASE`
 
@@ -123,6 +123,16 @@ CONSUMER_ENABLED=true \
 go run ./cmd/server
 ```
 
+Run with Redis cache:
+
+```bash
+DATABASE_URL='postgres://user:password@localhost:5432/feed_social?sslmode=disable' \
+REDIS_URL='redis://localhost:6379/0' \
+CACHE_ENABLED=true \
+FEED_CACHE_TTL=60s \
+go run ./cmd/server
+```
+
 Seed a ready feed item through the controlled local/dev ingestion API after starting the service with `INTERNAL_API_TOKEN=local-secret`:
 
 ```bash
@@ -159,6 +169,13 @@ curl -X POST http://localhost:8080/v1/videos/vid_123/comments \
   -d '{"body":"hello feed"}'
 
 curl http://localhost:8080/v1/videos/vid_123/comments
+```
+
+Follow and unfollow a user:
+
+```bash
+curl -X PUT http://localhost:8080/v1/users/usr_creator/follow -H 'X-User-ID: usr_viewer'
+curl -X DELETE http://localhost:8080/v1/users/usr_creator/follow -H 'X-User-ID: usr_viewer'
 ```
 
 ## Incident Scenarios

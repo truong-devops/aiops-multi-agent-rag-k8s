@@ -11,6 +11,7 @@ const (
 	CodeForbidden              = "FORBIDDEN"
 	CodeInternalAPIUnavailable = "INTERNAL_API_UNAVAILABLE"
 	CodeCommentNotFound        = "COMMENT_NOT_FOUND"
+	CodeFollowNotFound         = "FOLLOW_NOT_FOUND"
 	CodeRouteNotFound          = "ROUTE_NOT_FOUND"
 	CodeMethodNotAllowed       = "METHOD_NOT_ALLOWED"
 	CodeInternal               = "INTERNAL_ERROR"

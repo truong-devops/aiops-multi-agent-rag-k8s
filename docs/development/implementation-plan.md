@@ -16,7 +16,7 @@ As of 2026-07-07:
 - `api-gateway`: da co routing, request/correlation ID, JWT verify qua JWKS, trusted user-context forwarding, readiness va basic metrics.
 - `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow, upload idempotency, MinIO/S3 presigned upload URL, optional object metadata verification, owner/internal authorization va Redpanda/Kafka outbox publisher cho `video.uploaded.v1`.
 - `media-worker`: da co production-shaped scaffold, PostgreSQL job persistence, `video.uploaded.v1` consumer, placeholder runner, video-service status update client, retry/backoff, dead-letter, FFmpeg/FFprobe processing mode, MinIO raw download, processed output upload, thumbnail upload, lifecycle event contract builders, richer operational metrics/logging, PostgreSQL integration test target va FFmpeg smoke test.
-- `feed-social-service`: da co production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, in-memory local store, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert, `GET /v1/feed`, Kafka/Redpanda consumer cho `video.ready.v1`, controlled internal ingestion fallback, idempotent likes, PostgreSQL comments MVP, durable like/comment counters, repository/API/event tests; chua co follows/cache.
+- `feed-social-service`: da co production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, in-memory local store, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert, `GET /v1/feed`, Kafka/Redpanda consumer cho `video.ready.v1`, controlled internal ingestion fallback, idempotent likes, PostgreSQL comments MVP, durable like/comment counters, follows, optional Redis cache cho guest feed/social counters, repository/API/event/cache tests; chua co full compose/Kubernetes wiring.
 - `live-service`: van chu yeu la skeleton.
 - `aiops-service`: da co package layout, chua co RCA pipeline that.
 
@@ -112,9 +112,9 @@ Detailed service checklist: `docs/development/feed-social-service-implementation
 - `[x]` Consume `video.ready.v1` or query via controlled API for MVP.
 - `[x]` Add likes.
 - `[x]` Add comments.
-- `[ ]` Add follows.
-- `[ ]` Add cache only after durable source of truth is clear.
-- `[ ]` Add tests for feed visibility and ready-only behavior.
+- `[x]` Add follows.
+- `[x]` Add cache only after durable source of truth is clear.
+- `[x]` Add tests for feed visibility and ready-only behavior.
 
 Done criteria:
 
@@ -222,7 +222,7 @@ Done criteria:
 1. Add GitOps/Kubernetes manifests and resource requests/limits for `video-service` and `media-worker`.
 2. Add full compose smoke test for the video upload-to-processing flow.
 3. Keep gateway rate limiting as a hardening task after video flow has durable storage.
-4. Implement `feed-social-service` Phase 7 follows if needed, then add a local compose smoke test for ready feed plus like/comment.
+4. Add local compose smoke test for ready feed plus like/comment/follow, then move to `live-service` if the product flow is enough.
 
 ## Update Rule
 

@@ -18,6 +18,10 @@ const (
 	CommentStatusDeleted = "deleted"
 	CommentStatusBlocked = "blocked"
 
+	FollowStatusActive  = "active"
+	FollowStatusDeleted = "deleted"
+	FollowStatusBlocked = "blocked"
+
 	InboxStatusProcessed = "processed"
 	InboxStatusDuplicate = "duplicate"
 )
@@ -67,6 +71,17 @@ type Comment struct {
 	VideoID       string
 	UserID        string
 	Body          string
+	Status        string
+	RequestID     string
+	CorrelationID string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type Follow struct {
+	ID            string
+	FollowerID    string
+	FolloweeID    string
 	Status        string
 	RequestID     string
 	CorrelationID string
@@ -211,6 +226,15 @@ func ValidLikeStatus(value string) bool {
 func ValidCommentStatus(value string) bool {
 	switch value {
 	case CommentStatusVisible, CommentStatusHidden, CommentStatusDeleted, CommentStatusBlocked:
+		return true
+	default:
+		return false
+	}
+}
+
+func ValidFollowStatus(value string) bool {
+	switch value {
+	case FollowStatusActive, FollowStatusDeleted, FollowStatusBlocked:
 		return true
 	default:
 		return false

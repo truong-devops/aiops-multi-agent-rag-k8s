@@ -21,6 +21,14 @@ type SocialMutation struct {
 	Now           time.Time
 }
 
+type FollowMutation struct {
+	FollowerID    string
+	FolloweeID    string
+	RequestID     string
+	CorrelationID string
+	Now           time.Time
+}
+
 type ListCommentsFilter struct {
 	VideoID         string
 	Limit           int
@@ -37,5 +45,6 @@ type Store interface {
 	CreateComment(ctx context.Context, comment domain.Comment) (domain.Comment, domain.VideoSocialCounters, error)
 	ListComments(ctx context.Context, filter ListCommentsFilter) ([]domain.Comment, error)
 	DeleteComment(ctx context.Context, commentID string, actorID string, actorRole string, now time.Time) (domain.Comment, domain.VideoSocialCounters, bool, error)
+	SetFollow(ctx context.Context, mutation FollowMutation, following bool) (domain.Follow, bool, error)
 	Ping(ctx context.Context) error
 }
