@@ -59,8 +59,8 @@ func TestLoadReadsGatewayConfigFromEnvironment(t *testing.T) {
 	if len(cfg.CORSAllowedOrigins) != 2 {
 		t.Fatalf("CORSAllowedOrigins len = %d, want 2", len(cfg.CORSAllowedOrigins))
 	}
-	if len(cfg.Routes) != 6 {
-		t.Fatalf("Routes len = %d, want 6", len(cfg.Routes))
+	if len(cfg.Routes) != 9 {
+		t.Fatalf("Routes len = %d, want 9", len(cfg.Routes))
 	}
 
 	route := cfg.Routes[0]

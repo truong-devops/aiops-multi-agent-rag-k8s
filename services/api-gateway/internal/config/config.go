@@ -11,9 +11,10 @@ import (
 )
 
 type Route struct {
-	Name   string
-	Prefix string
-	Target *url.URL
+	Name            string
+	Prefix          string
+	Target          *url.URL
+	NestedResources []string
 }
 
 type Config struct {
@@ -53,22 +54,26 @@ func Load() (Config, error) {
 		JWKSCacheTTL:          parseDuration(getenv("JWKS_CACHE_TTL", "5m"), 5*time.Minute),
 		AuthRequiredPrefixes: parseCSV(getenv(
 			"AUTH_REQUIRED_PREFIXES",
-			"/api/v1/users/,/api/v1/videos/,/api/v1/live-sessions/,/api/v1/incidents/",
+			"/api/v1/users,/api/v1/videos,/api/v1/comments,/api/v1/live-sessions,/api/v1/incidents",
 		)),
 	}, nil
 }
 
 func loadRoutes() ([]Route, error) {
 	rawRoutes := []struct {
-		name   string
-		prefix string
-		target string
+		name            string
+		prefix          string
+		target          string
+		nestedResources []string
 	}{
 		{name: "identity-service", prefix: "/api/v1/auth/", target: getenv("IDENTITY_SERVICE_URL", "http://localhost:8081")},
+		{name: "feed-social-service", prefix: "/api/v1/users/", target: getenv("FEED_SERVICE_URL", "http://localhost:8083"), nestedResources: []string{"follow"}},
 		{name: "identity-service", prefix: "/api/v1/users/", target: getenv("IDENTITY_SERVICE_URL", "http://localhost:8081")},
+		{name: "feed-social-service", prefix: "/api/v1/videos/", target: getenv("FEED_SERVICE_URL", "http://localhost:8083"), nestedResources: []string{"social", "like", "comments"}},
 		{name: "video-service", prefix: "/api/v1/videos/", target: getenv("VIDEO_SERVICE_URL", "http://localhost:8082")},
 		{name: "feed-social-service", prefix: "/api/v1/feed", target: getenv("FEED_SERVICE_URL", "http://localhost:8083")},
-		{name: "live-service", prefix: "/api/v1/live-sessions/", target: getenv("LIVE_SERVICE_URL", "http://localhost:8084")},
+		{name: "feed-social-service", prefix: "/api/v1/comments/", target: getenv("FEED_SERVICE_URL", "http://localhost:8083")},
+		{name: "live-service", prefix: "/api/v1/live-sessions", target: getenv("LIVE_SERVICE_URL", "http://localhost:8084")},
 		{name: "aiops-service", prefix: "/api/v1/incidents/", target: getenv("AIOPS_SERVICE_URL", "http://localhost:8085")},
 	}
 
@@ -81,7 +86,7 @@ func loadRoutes() ([]Route, error) {
 		if parsed.Scheme == "" || parsed.Host == "" {
 			return nil, fmt.Errorf("route %s target must include scheme and host", rawRoute.prefix)
 		}
-		routes = append(routes, Route{Name: rawRoute.name, Prefix: rawRoute.prefix, Target: parsed})
+		routes = append(routes, Route{Name: rawRoute.name, Prefix: rawRoute.prefix, Target: parsed, NestedResources: rawRoute.nestedResources})
 	}
 	return routes, nil
 }

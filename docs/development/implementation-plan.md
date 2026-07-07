@@ -17,7 +17,7 @@ As of 2026-07-07:
 - `video-service`: da co in-memory local mode, PostgreSQL persistence, local/CI DB integration test workflow, upload idempotency, MinIO/S3 presigned upload URL, optional object metadata verification, owner/internal authorization va Redpanda/Kafka outbox publisher cho `video.uploaded.v1`.
 - `media-worker`: da co production-shaped scaffold, PostgreSQL job persistence, `video.uploaded.v1` consumer, placeholder runner, video-service status update client, retry/backoff, dead-letter, FFmpeg/FFprobe processing mode, MinIO raw download, processed output upload, thumbnail upload, lifecycle event contract builders, richer operational metrics/logging, PostgreSQL integration test target va FFmpeg smoke test.
 - `feed-social-service`: da co production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, in-memory local store, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert, `GET /v1/feed`, Kafka/Redpanda consumer cho `video.ready.v1`, controlled internal ingestion fallback, idempotent likes, PostgreSQL comments MVP, durable like/comment counters, follows, optional Redis cache cho guest feed/social counters, repository/API/event/cache tests; chua co full compose/Kubernetes wiring.
-- `live-service`: van chu yeu la skeleton.
+- `live-service`: da co MVP API cho tao/list/get/start/end live session, state machine `scheduled -> live -> ended`, stream key hash, PostgreSQL schema/repository, local in-memory fallback, owner/admin authorization, health/readiness/metrics va gateway route fix cho `POST /api/v1/live-sessions`.
 - `aiops-service`: da co package layout, chua co RCA pipeline that.
 
 ## Milestone 0: Project Rules And Handoff
@@ -222,7 +222,7 @@ Done criteria:
 1. Add GitOps/Kubernetes manifests and resource requests/limits for `video-service` and `media-worker`.
 2. Add full compose smoke test for the video upload-to-processing flow.
 3. Keep gateway rate limiting as a hardening task after video flow has durable storage.
-4. Add local compose smoke test for ready feed plus like/comment/follow, then move to `live-service` if the product flow is enough.
+4. Add local compose smoke test for ready feed plus like/comment/follow and basic live session create/start/end through gateway.
 
 ## Update Rule
 

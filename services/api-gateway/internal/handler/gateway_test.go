@@ -147,6 +147,78 @@ func TestGatewayMatchesFeedRouteWithoutMatchingFeedback(t *testing.T) {
 	assertErrorCode(t, rec.Body.Bytes(), "ROUTE_NOT_FOUND")
 }
 
+func TestGatewayRoutesSocialSubresourcesToFeedService(t *testing.T) {
+	feed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte("feed:" + req.URL.Path))
+	}))
+	defer feed.Close()
+	video := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte("video:" + req.URL.Path))
+	}))
+	defer video.Close()
+	identity := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte("identity:" + req.URL.Path))
+	}))
+	defer identity.Close()
+
+	gateway := newTestGateway(t, []config.Route{
+		{Name: "feed-social-service", Prefix: "/api/v1/users/", Target: mustURL(t, feed.URL), NestedResources: []string{"follow"}},
+		{Name: "identity-service", Prefix: "/api/v1/users/", Target: mustURL(t, identity.URL)},
+		{Name: "feed-social-service", Prefix: "/api/v1/videos/", Target: mustURL(t, feed.URL), NestedResources: []string{"social", "like", "comments"}},
+		{Name: "video-service", Prefix: "/api/v1/videos/", Target: mustURL(t, video.URL)},
+		{Name: "feed-social-service", Prefix: "/api/v1/comments/", Target: mustURL(t, feed.URL)},
+	})
+
+	cases := map[string]string{
+		"/api/v1/videos/vid_123/like":     "feed:/v1/videos/vid_123/like",
+		"/api/v1/videos/vid_123/comments": "feed:/v1/videos/vid_123/comments",
+		"/api/v1/videos/vid_123/social":   "feed:/v1/videos/vid_123/social",
+		"/api/v1/comments/cmt_123":        "feed:/v1/comments/cmt_123",
+		"/api/v1/users/usr_123/follow":    "feed:/v1/users/usr_123/follow",
+		"/api/v1/videos/vid_123":          "video:/v1/videos/vid_123",
+		"/api/v1/users/me":                "identity:/v1/users/me",
+	}
+
+	for path, want := range cases {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+
+		gateway.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body = %s", path, rec.Code, rec.Body.String())
+		}
+		if got := rec.Body.String(); got != want {
+			t.Fatalf("%s upstream = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestGatewayMatchesLiveSessionsRouteWithAndWithoutTrailingSlash(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(req.URL.Path))
+	}))
+	defer upstream.Close()
+
+	gateway := newTestGateway(t, []config.Route{
+		{Name: "live-service", Prefix: "/api/v1/live-sessions", Target: mustURL(t, upstream.URL)},
+	})
+
+	for _, path := range []string{"/api/v1/live-sessions", "/api/v1/live-sessions/live_123/start"} {
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		rec := httptest.NewRecorder()
+
+		gateway.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, body = %s", path, rec.Code, rec.Body.String())
+		}
+		if !strings.HasPrefix(rec.Body.String(), "/v1/live-sessions") {
+			t.Fatalf("%s upstream path = %q, want /v1/live-sessions prefix", path, rec.Body.String())
+		}
+	}
+}
+
 func TestGatewayReturnsJSONBadGatewayWhenUpstreamFails(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

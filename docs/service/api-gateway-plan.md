@@ -34,7 +34,10 @@ Public API nên đi qua prefix `/api/v1`.
 /api/v1/users/*         -> identity-service /v1/users/*
 /api/v1/videos/*        -> video-service /v1/videos/*
 /api/v1/feed*           -> feed-social-service /v1/feed*
-/api/v1/live-sessions/* -> live-service /v1/live-sessions/*
+/api/v1/videos/{id}/like|comments|social -> feed-social-service /v1/videos/{id}/like|comments|social
+/api/v1/comments/*      -> feed-social-service /v1/comments/*
+/api/v1/users/{id}/follow -> feed-social-service /v1/users/{id}/follow
+/api/v1/live-sessions*  -> live-service /v1/live-sessions*
 /api/v1/incidents/*     -> aiops-service /v1/incidents/*
 ```
 

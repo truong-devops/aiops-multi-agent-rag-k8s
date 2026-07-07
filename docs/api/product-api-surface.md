@@ -11,12 +11,15 @@ GET /healthz
 GET /readyz
 GET /metrics
 
-/api/v1/auth/*          -> identity-service
-/api/v1/users/*         -> identity-service
-/api/v1/videos/*        -> video-service
-/api/v1/feed*           -> feed-social-service
-/api/v1/live-sessions/* -> live-service
-/api/v1/incidents/*     -> aiops-service
+/api/v1/auth/*                             -> identity-service
+/api/v1/users/*                            -> identity-service
+/api/v1/videos/*                           -> video-service
+/api/v1/feed*                              -> feed-social-service
+/api/v1/videos/{id}/like|comments|social -> feed-social-service
+/api/v1/comments/*                         -> feed-social-service
+/api/v1/users/{id}/follow                  -> feed-social-service
+/api/v1/live-sessions*                     -> live-service
+/api/v1/incidents/*                        -> aiops-service
 ```
 
 ## identity-service
@@ -49,11 +52,13 @@ GET  /metrics
 
 ```text
 GET  /v1/feed
-POST /v1/videos/{video_id}/likes
-DELETE /v1/videos/{video_id}/likes
+PUT  /v1/videos/{video_id}/like
+DELETE /v1/videos/{video_id}/like
+GET  /v1/videos/{video_id}/social
 GET  /v1/videos/{video_id}/comments
 POST /v1/videos/{video_id}/comments
-POST /v1/users/{user_id}/follow
+DELETE /v1/comments/{comment_id}
+PUT  /v1/users/{user_id}/follow
 DELETE /v1/users/{user_id}/follow
 GET  /healthz
 GET  /readyz
@@ -64,6 +69,7 @@ GET  /metrics
 
 ```text
 POST /v1/live-sessions
+GET  /v1/live-sessions
 GET  /v1/live-sessions/{live_session_id}
 POST /v1/live-sessions/{live_session_id}/start
 POST /v1/live-sessions/{live_session_id}/end

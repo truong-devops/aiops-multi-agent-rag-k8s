@@ -9,7 +9,8 @@ Initial responsibilities:
 - Route `/api/v1/auth/*` and `/api/v1/users/*` to `identity-service`.
 - Route `/api/v1/videos/*` to `video-service`.
 - Route `/api/v1/feed*` to `feed-social-service`.
-- Route `/api/v1/live-sessions/*` to `live-service`.
+- Route social subresources `/api/v1/videos/{video_id}/like|comments|social`, `/api/v1/comments/*`, and `/api/v1/users/{user_id}/follow` to `feed-social-service`.
+- Route `/api/v1/live-sessions*` to `live-service`.
 - Route `/api/v1/incidents/*` to `aiops-service`.
 - Attach `X-Request-ID` and `X-Correlation-ID`.
 - Verify JWT access tokens through JWKS from `identity-service` for protected API prefixes.
@@ -50,6 +51,6 @@ The gateway should not own business data or implement product business logic.
 | `JWT_ISSUER` | `aiops-video-platform` | Expected JWT issuer. |
 | `JWT_AUDIENCE` | `aiops-api` | Expected JWT audience. |
 | `JWKS_CACHE_TTL` | `5m` | Local JWKS cache duration. |
-| `AUTH_REQUIRED_PREFIXES` | `/api/v1/users/,/api/v1/videos/,/api/v1/live-sessions/,/api/v1/incidents/` | Comma-separated public API prefixes that require a valid access token. |
+| `AUTH_REQUIRED_PREFIXES` | `/api/v1/users,/api/v1/videos,/api/v1/comments,/api/v1/live-sessions,/api/v1/incidents` | Comma-separated public API prefixes that require a valid access token. |
 
 When `JWT_VERIFY_ENABLED=true`, `/readyz` checks that JWKS can be fetched. For local-only development without `identity-service`, set `JWT_VERIFY_ENABLED=false`.

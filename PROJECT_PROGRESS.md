@@ -38,7 +38,7 @@ As of 2026-07-07:
 - `video-service` now has a production-shaped implementation for upload requests, video metadata, upload confirmation with optional MinIO/S3 object metadata verification, video status transitions, request/correlation IDs, readiness, metrics, tests, PostgreSQL persistence with local in-memory fallback, local/CI DB integration workflow, idempotent upload intent creation, MinIO/S3 presigned upload URLs, owner/internal authorization, pending outbox writes for `video.uploaded.v1`, and a Redpanda/Kafka outbox publisher worker.
 - `media-worker` now has a production-shaped scaffold, config validation, health/readiness/metrics, domain models for processing jobs/attempts/dead letters, PostgreSQL schema and repository, local in-memory test store, Kafka consumer for `video.uploaded.v1`, placeholder processing runner, FFmpeg/FFprobe processing mode, MinIO raw download/output upload, thumbnail generation, video-service internal status update client, retry/backoff, dead-letter behavior, lifecycle event contract builders, richer operational metrics/logging, a PostgreSQL integration-test target, and an FFmpeg smoke test.
 - `feed-social-service` now has a production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, local in-memory fallback, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert, stable feed list repository query, `GET /v1/feed`, `video.ready.v1` Kafka/Redpanda consumer, controlled internal ingestion fallback, idempotent likes, PostgreSQL comments MVP, durable like/comment counters, follows, optional Redis cache for guest feed/social counters, repository/API/event/cache tests, and a skipped-by-default PostgreSQL integration harness. It still needs full compose/Kubernetes wiring.
-- `live-service` is still mostly a skeleton with health, readiness, and metrics placeholders.
+- `live-service` now has a production-shaped MVP for basic app APIs: config validation, local in-memory fallback, PostgreSQL schema/repository, create/list/get live sessions, owner/admin start/end lifecycle transitions, stream key hash storage, live event audit rows, readiness, metrics, and gateway routing for `/api/v1/live-sessions`.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
 
 ## Decisions Made
@@ -60,6 +60,14 @@ As of 2026-07-07:
 ## Work Log
 
 ### 2026-07-07
+
+- Implemented the first production-shaped `live-service` slice for basic app APIs.
+- Replaced the placeholder server with config loading, JSON structured logs, body limit, request/correlation middleware, graceful shutdown, readiness through store ping, and Prometheus text metrics.
+- Added live session domain/state rules, PostgreSQL migration `001_live_schema.sql`, local in-memory store, PostgreSQL repository, and DB operation instrumentation.
+- Added `POST /v1/live-sessions`, `GET /v1/live-sessions`, `GET /v1/live-sessions/{live_session_id}`, `POST /v1/live-sessions/{live_session_id}/start`, and `POST /v1/live-sessions/{live_session_id}/end`.
+- Added trusted user-context authorization for owner/admin lifecycle actions and ensured plaintext `stream_key` is returned only during session creation while the database stores a hash.
+- Fixed `api-gateway` live route matching so `POST /api/v1/live-sessions` routes correctly without requiring a trailing slash, and added nested social routing so video like/comment/social plus user follow endpoints reach `feed-social-service` through public API paths.
+- Notes for next session: add compose/Kubernetes wiring and a gateway-level smoke test that covers auth -> live create/start/end plus video/feed basics.
 
 - Implemented `feed-social-service` Phase 7 and Phase 8 from `docs/development/feed-social-service-implementation-plan.md`.
 - Added migration `003_follows_schema.sql`, follow domain status, idempotent `PUT /v1/users/{user_id}/follow`, idempotent `DELETE /v1/users/{user_id}/follow`, self-follow rejection, trusted user context enforcement, and handler/service/repository tests.

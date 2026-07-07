@@ -15,10 +15,11 @@ import (
 )
 
 type route struct {
-	name   string
-	prefix string
-	target *url.URL
-	proxy  *httputil.ReverseProxy
+	name            string
+	prefix          string
+	target          *url.URL
+	nestedResources map[string]struct{}
+	proxy           *httputil.ReverseProxy
 }
 
 type Gateway struct {
@@ -44,6 +45,13 @@ func NewGateway(routes []config.Route, upstreamTimeout time.Duration, logger *sl
 		name := cfgRoute.Name
 		if name == "" {
 			name = target.Host
+		}
+		nestedResources := map[string]struct{}{}
+		for _, item := range cfgRoute.NestedResources {
+			item = strings.Trim(strings.ToLower(item), "/ ")
+			if item != "" {
+				nestedResources[item] = struct{}{}
+			}
 		}
 
 		proxy := httputil.NewSingleHostReverseProxy(&target)
@@ -74,10 +82,11 @@ func NewGateway(routes []config.Route, upstreamTimeout time.Duration, logger *sl
 		}
 
 		gateway.routes = append(gateway.routes, route{
-			name:   name,
-			prefix: prefix,
-			target: &target,
-			proxy:  proxy,
+			name:            name,
+			prefix:          prefix,
+			target:          &target,
+			nestedResources: nestedResources,
+			proxy:           proxy,
 		})
 	}
 	sort.SliceStable(gateway.routes, func(i, j int) bool {
@@ -88,7 +97,7 @@ func NewGateway(routes []config.Route, upstreamTimeout time.Duration, logger *sl
 
 func (g *Gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for _, route := range g.routes {
-		if matchRoute(req.URL.Path, route.prefix) {
+		if matchRoute(req.URL.Path, route.prefix, route.nestedResources) {
 			g.logger.Debug(
 				"proxying request",
 				"upstream_service", route.name,
@@ -103,11 +112,27 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	WriteError(w, req, http.StatusNotFound, "ROUTE_NOT_FOUND", "No API route matched the request path.")
 }
 
-func matchRoute(path string, prefix string) bool {
+func matchRoute(path string, prefix string, nestedResources map[string]struct{}) bool {
+	if len(nestedResources) > 0 {
+		return matchNestedResource(path, prefix, nestedResources)
+	}
 	if strings.HasSuffix(prefix, "/") {
 		return strings.HasPrefix(path, prefix)
 	}
 	return path == prefix || strings.HasPrefix(path, prefix+"/")
+}
+
+func matchNestedResource(path string, prefix string, nestedResources map[string]struct{}) bool {
+	if !strings.HasSuffix(prefix, "/") || !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	trimmed := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	_, ok := nestedResources[strings.ToLower(parts[1])]
+	return ok
 }
 
 func trimPublicAPIPrefix(path string) string {

@@ -39,6 +39,22 @@ func TestAuthMiddlewareRequiresTokenForProtectedPrefixes(t *testing.T) {
 	assertErrorCode(t, rec.Body.Bytes(), "AUTH_REQUIRED")
 }
 
+func TestAuthMiddlewareRequiresTokenForExactProtectedPrefix(t *testing.T) {
+	handler := AuthMiddleware(&fakeVerifier{}, []string{"/api/v1/live-sessions"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next handler should not be called")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/live-sessions", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	assertErrorCode(t, rec.Body.Bytes(), "AUTH_REQUIRED")
+}
+
 func TestAuthMiddlewareForwardsTrustedUserContext(t *testing.T) {
 	verifier := &fakeVerifier{
 		claims: Claims{
