@@ -14,8 +14,8 @@ import (
 )
 
 const feedItemColumns = `
-	id, video_id, owner_id, title, description, thumbnail_object_key,
-	playback_object_key, duration_ms, visibility, status, ready_at, created_at, updated_at
+	f.id, f.video_id, f.owner_id, f.title, f.description, f.thumbnail_object_key,
+	f.playback_object_key, f.duration_ms, f.visibility, f.status, f.ready_at, f.created_at, f.updated_at
 `
 
 const commentColumns = `

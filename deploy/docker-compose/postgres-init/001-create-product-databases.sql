@@ -1,0 +1,5 @@
+CREATE DATABASE identity_db;
+CREATE DATABASE video_db;
+CREATE DATABASE media_db;
+CREATE DATABASE feed_social_db;
+CREATE DATABASE live_db;

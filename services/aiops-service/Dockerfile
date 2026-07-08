@@ -11,4 +11,7 @@ RUN pip install --no-cache-dir .
 COPY app ./app
 
 EXPOSE 8080
+RUN groupadd --system --gid 65532 appuser \
+    && useradd --system --uid 65532 --gid 65532 --home-dir /app appuser
+USER 65532:65532
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

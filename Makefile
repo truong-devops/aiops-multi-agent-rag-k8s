@@ -1,12 +1,17 @@
 SHELL := /bin/sh
 
-.PHONY: help tree doctor status test-video test-video-integration test-media test-media-integration test-live smoke-media-ffmpeg compose-test-db-up compose-test-db-down compose-media-test-db-up compose-media-test-db-down
+.PHONY: help tree doctor status compose-config compose-up compose-up-aiops compose-down compose-logs test-video test-video-integration test-media test-media-integration test-live smoke-media-ffmpeg compose-test-db-up compose-test-db-down compose-media-test-db-up compose-media-test-db-down
 
 help:
 	@echo "Available targets:"
 	@echo "  make tree    - Show project tree without .git"
 	@echo "  make doctor  - Check common local tools"
 	@echo "  make status  - Show git status"
+	@echo "  make compose-config  - Validate rendered docker-compose configuration"
+	@echo "  make compose-up      - Build and run local product stack"
+	@echo "  make compose-up-aiops - Build and run local product stack with aiops-service profile"
+	@echo "  make compose-down    - Stop local compose stack"
+	@echo "  make compose-logs    - Follow local compose logs"
 	@echo "  make test-video             - Run video-service tests"
 	@echo "  make test-video-integration - Run video-service PostgreSQL integration tests"
 	@echo "  make test-media             - Run media-worker tests"
@@ -32,6 +37,21 @@ doctor:
 
 status:
 	@git status --short
+
+compose-config:
+	@docker compose config
+
+compose-up:
+	@docker compose up --build
+
+compose-up-aiops:
+	@docker compose --profile aiops up --build
+
+compose-down:
+	@docker compose down
+
+compose-logs:
+	@docker compose logs -f
 
 test-video:
 	@cd services/video-service && go test ./...

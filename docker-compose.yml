@@ -1,21 +1,370 @@
 name: aiops-video-platform
 
+x-common-env: &common-env
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  REQUEST_BODY_LIMIT_BYTES: ${REQUEST_BODY_LIMIT_BYTES:-1048576}
+
+x-product-env: &product-env
+  <<: *common-env
+  ENVIRONMENT: ${ENVIRONMENT:-compose}
+
+x-postgres-env: &postgres-env
+  POSTGRES_USER: ${POSTGRES_USER:-aiops}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aiops}
+  POSTGRES_DB: ${POSTGRES_DB:-postgres}
+
+x-minio-env: &minio-env
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-aiops}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aiops}
-      POSTGRES_DB: ${POSTGRES_DB:-aiops}
+      <<: *postgres-env
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./deploy/docker-compose/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aiops} -d ${POSTGRES_DB:-aiops}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  migrate:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-aiops}
+    volumes:
+      - ./services/identity-service/migrations:/migrations/identity:ro
+      - ./services/video-service/migrations:/migrations/video:ro
+      - ./services/media-worker/migrations:/migrations/media:ro
+      - ./services/feed-social-service/migrations:/migrations/feed-social:ro
+      - ./services/live-service/migrations:/migrations/live:ro
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        run_migrations() {
+          db="$$1"
+          dir="$$2"
+          echo "applying migrations for $$db from $$dir"
+          for file in "$$dir"/*.sql; do
+            [ -e "$$file" ] || continue
+            echo "  -> $$(basename "$$file")"
+            psql -v ON_ERROR_STOP=1 -h postgres -U ${POSTGRES_USER:-aiops} -d "$$db" -f "$$file"
+          done
+        }
+        run_migrations identity_db /migrations/identity
+        run_migrations video_db /migrations/video
+        run_migrations media_db /migrations/media
+        run_migrations feed_social_db /migrations/feed-social
+        run_migrations live_db /migrations/live
+        echo "all product migrations applied"
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      <<: *minio-env
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      <<: *minio-env
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing local/raw-videos
+        mc mb --ignore-existing local/processed-videos
+        mc mb --ignore-existing local/thumbnails
+        mc anonymous set none local/raw-videos
+        mc anonymous set download local/processed-videos
+        mc anonymous set download local/thumbnails
+        echo "minio buckets are ready"
+    restart: "no"
+
+  redpanda:
+    image: redpandadata/redpanda:v24.3.5
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    ports:
+      - "${REDPANDA_BROKER_PORT:-9092}:9092"
+      - "${REDPANDA_ADMIN_PORT:-9644}:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster info --brokers=localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.12.3
+    ports:
+      - "${MEDIAMTX_RTMP_PORT:-1935}:1935"
+      - "${MEDIAMTX_RTSP_PORT:-8554}:8554"
+      - "${MEDIAMTX_HLS_PORT:-8888}:8888"
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.14.1
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  identity-service:
+    image: aiops/identity-service:${IMAGE_TAG:-local}
+    build:
+      context: ./services/identity-service
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *common-env
+      ENVIRONMENT: ${IDENTITY_ENVIRONMENT:-local}
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/identity_db?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      JWT_ISSUER: ${JWT_ISSUER:-aiops-video-platform}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-aiops-api}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-168h}
+    ports:
+      - "${IDENTITY_SERVICE_PORT:-8081}:8080"
+    restart: unless-stopped
+
+  video-service:
+    image: aiops/video-service:${IMAGE_TAG:-local}
+    build:
+      context: ./services/video-service
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+    environment:
+      <<: *product-env
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/video_db?sslmode=disable
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      RAW_VIDEO_BUCKET: raw-videos
+      MINIO_ENDPOINT: ${VIDEO_MINIO_ENDPOINT:-localhost:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_REGION: us-east-1
+      MINIO_USE_SSL: "false"
+      VERIFY_UPLOAD_OBJECT: ${VERIFY_UPLOAD_OBJECT:-false}
+      KAFKA_BROKERS: redpanda:9092
+      VIDEO_EVENTS_TOPIC: video.events
+      OUTBOX_PUBLISHER_ENABLED: "true"
+      OUTBOX_POLL_INTERVAL: 5s
+      OUTBOX_BATCH_SIZE: 25
+    ports:
+      - "${VIDEO_SERVICE_PORT:-8082}:8080"
+    restart: unless-stopped
+
+  media-worker:
+    image: aiops/media-worker:${IMAGE_TAG:-local}
+    build:
+      context: ./services/media-worker
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+      video-service:
+        condition: service_started
+    environment:
+      <<: *product-env
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/media_db?sslmode=disable
+      KAFKA_BROKERS: redpanda:9092
+      VIDEO_EVENTS_TOPIC: video.events
+      MEDIA_EVENTS_TOPIC: media.events
+      CONSUMER_GROUP: media-worker
+      CONSUMER_ENABLED: "true"
+      RUNNER_ENABLED: "true"
+      VIDEO_SERVICE_BASE_URL: http://video-service:8080
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_REGION: us-east-1
+      MINIO_USE_SSL: "false"
+      RAW_VIDEO_BUCKET: raw-videos
+      PROCESSED_VIDEO_BUCKET: processed-videos
+      THUMBNAIL_BUCKET: thumbnails
+      PROCESSING_MODE: ${PROCESSING_MODE:-placeholder}
+      FFMPEG_PATH: ffmpeg
+      FFPROBE_PATH: ffprobe
+    ports:
+      - "${MEDIA_WORKER_PORT:-8086}:8080"
+    restart: unless-stopped
+
+  feed-social-service:
+    image: aiops/feed-social-service:${IMAGE_TAG:-local}
+    build:
+      context: ./services/feed-social-service
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      <<: *product-env
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/feed_social_db?sslmode=disable
+      KAFKA_BROKERS: redpanda:9092
+      VIDEO_EVENTS_TOPIC: video.events
+      CONSUMER_GROUP: feed-social-service
+      CONSUMER_ENABLED: "true"
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      REDIS_URL: redis://redis:6379/1
+      CACHE_ENABLED: "true"
+      FEED_CACHE_TTL: 60s
+    ports:
+      - "${FEED_SERVICE_PORT:-8083}:8080"
+    restart: unless-stopped
+
+  live-service:
+    image: aiops/live-service:${IMAGE_TAG:-local}
+    build:
+      context: ./services/live-service
+      dockerfile: Dockerfile
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mediamtx:
+        condition: service_started
+    environment:
+      <<: *product-env
+      PORT: "8080"
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/live_db?sslmode=disable
+      LIVE_INGEST_BASE_URL: rtmp://localhost:${MEDIAMTX_RTMP_PORT:-1935}/live
+      LIVE_PLAYBACK_BASE_URL: http://localhost:${MEDIAMTX_HLS_PORT:-8888}/live
+    ports:
+      - "${LIVE_SERVICE_PORT:-8084}:8080"
+    restart: unless-stopped
+
+  api-gateway:
+    image: aiops/api-gateway:${IMAGE_TAG:-local}
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    depends_on:
+      identity-service:
+        condition: service_started
+      video-service:
+        condition: service_started
+      feed-social-service:
+        condition: service_started
+      live-service:
+        condition: service_started
+    environment:
+      <<: *product-env
+      PORT: "8080"
+      IDENTITY_SERVICE_URL: http://identity-service:8080
+      VIDEO_SERVICE_URL: http://video-service:8080
+      FEED_SERVICE_URL: http://feed-social-service:8080
+      LIVE_SERVICE_URL: http://live-service:8080
+      AIOPS_SERVICE_URL: http://aiops-service:8080
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      JWT_VERIFY_ENABLED: ${JWT_VERIFY_ENABLED:-true}
+      JWKS_URL: http://identity-service:8080/.well-known/jwks.json
+      JWT_ISSUER: ${JWT_ISSUER:-aiops-video-platform}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-aiops-api}
+      AUTH_REQUIRED_PREFIXES: /api/v1/users,/api/v1/videos,/api/v1/comments,/api/v1/live-sessions,/api/v1/incidents
+      UPSTREAM_TIMEOUT: 15s
+    ports:
+      - "${API_GATEWAY_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  aiops-service:
+    profiles:
+      - aiops
+    image: aiops/aiops-service:${IMAGE_TAG:-local}
+    build:
+      context: ./services/aiops-service
+      dockerfile: Dockerfile
+    depends_on:
+      qdrant:
+        condition: service_started
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-compose}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${AIOPS_SERVICE_PORT:-8085}:8080"
+    restart: unless-stopped
 
   postgres-test:
     image: postgres:16-alpine
@@ -52,74 +401,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  redpanda:
-    image: redpandadata/redpanda:v24.3.5
-    command:
-      - redpanda
-      - start
-      - --overprovisioned
-      - --smp
-      - "1"
-      - --memory
-      - 1G
-      - --reserve-memory
-      - 0M
-      - --node-id
-      - "0"
-      - --check=false
-      - --kafka-addr
-      - PLAINTEXT://0.0.0.0:9092
-      - --advertise-kafka-addr
-      - PLAINTEXT://localhost:9092
-    ports:
-      - "${REDPANDA_BROKER_PORT:-9092}:9092"
-      - "${REDPANDA_ADMIN_PORT:-9644}:9644"
-    volumes:
-      - redpanda_data:/var/lib/redpanda/data
-
-  qdrant:
-    image: qdrant/qdrant:v1.14.1
-    ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-
-  mediamtx:
-    image: bluenviron/mediamtx:1.12.3
-    ports:
-      - "${MEDIAMTX_RTSP_PORT:-8554}:8554"
-      - "${MEDIAMTX_HLS_PORT:-8888}:8888"
 
 volumes:
   postgres_data:

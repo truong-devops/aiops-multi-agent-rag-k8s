@@ -61,6 +61,15 @@ As of 2026-07-07:
 
 ### 2026-07-07
 
+- Added production-shaped local Docker Compose wiring for the core product stack.
+- Compose now builds/runs `api-gateway`, `identity-service`, `video-service`, `media-worker`, `feed-social-service`, and `live-service` with PostgreSQL, Redis, MinIO, Redpanda, MediaMTX, and Qdrant dependencies.
+- Added a PostgreSQL init script for per-service local databases, a migration job for service-owned schemas, and a MinIO bucket init job for raw/processed/thumbnail buckets.
+- Optimized service Dockerfiles by copying `go.sum` into Go build dependency layers where available, keeping `media-worker` on an FFmpeg-capable Alpine runtime, and running `aiops-service` as a non-root user.
+- Added Makefile helpers for compose validation, startup, shutdown, logs, and AIOps profile startup.
+- Verified the compose stack with Docker running: product services build, migrations apply, MinIO buckets initialize, gateway and service readiness endpoints return healthy, and gateway smoke paths for auth, live create/start/end, upload request, feed, like and social counters work.
+- Fixed a PostgreSQL query bug in `feed-social-service` where unqualified feed item columns became ambiguous after joining social counters.
+- Notes for next session: add a repeatable product smoke test script/Makefile target for auth, upload intent, feed/social APIs, and live create/start/end through `api-gateway`.
+
 - Implemented the first production-shaped `live-service` slice for basic app APIs.
 - Replaced the placeholder server with config loading, JSON structured logs, body limit, request/correlation middleware, graceful shutdown, readiness through store ping, and Prometheus text metrics.
 - Added live session domain/state rules, PostgreSQL migration `001_live_schema.sql`, local in-memory store, PostgreSQL repository, and DB operation instrumentation.

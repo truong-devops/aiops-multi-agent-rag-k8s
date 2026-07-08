@@ -93,9 +93,11 @@ Direct dependencies trong `pyproject.toml` phải dùng `==`. Không dùng `>=` 
 | PostgreSQL | `postgres:16-alpine` |
 | Redis | `redis:7-alpine` |
 | MinIO | `minio/minio:RELEASE.2025-04-22T22-12-26Z` |
+| MinIO client | `minio/mc:RELEASE.2025-04-16T18-13-26Z` |
 | Redpanda | `redpandadata/redpanda:v24.3.5` |
 | Qdrant | `qdrant/qdrant:v1.14.1` |
 | MediaMTX | `bluenviron/mediamtx:1.12.3` |
+| Media worker runtime | `alpine:3.23` |
 
 ### CI tool image baseline
 
