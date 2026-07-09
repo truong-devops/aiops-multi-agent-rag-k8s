@@ -59,6 +59,25 @@ As of 2026-07-07:
 
 ## Work Log
 
+### 2026-07-09
+
+- Applied a security hardening pass before frontend work.
+- Local compose now binds internal services and dependencies to `127.0.0.1`, keeps only `api-gateway` configurable for external binding, and requires local Postgres, MinIO and internal-token secrets instead of using committed defaults.
+- Updated `.env.example` and compose docs to require local secrets and explain the gateway-only access model.
+- `identity-service` no longer trusts `X-Forwarded-For`/`X-Real-IP` by default; added `TRUST_PROXY_HEADERS` for trusted proxy deployments.
+- `api-gateway` now sanitizes forwarded IP/proto headers before proxying so trusted-proxy deployments do not accept client-spoofed forwarding headers.
+- Added Google OAuth redirect allowlist support through `GOOGLE_ALLOWED_REDIRECT_URIS`, required outside local/dev/test when Google OAuth is enabled.
+- `feed-social-service` now requires `INTERNAL_API_TOKEN` outside local/dev/test because the internal ingestion route is registered.
+- Updated the product smoke test to use the real upload -> ready event -> feed ingestion path instead of direct internal feed seeding.
+- Verified with `go test ./...` across Go services, `POSTGRES_PASSWORD=test-postgres MINIO_ROOT_USER=test-minio MINIO_ROOT_PASSWORD=test-minio-pass INTERNAL_API_TOKEN=test-internal-token docker compose config`, and `make smoke-product`.
+
+- Fixed the ready-video event handoff for the product feed flow.
+- `media-worker` now sends processed object key, thumbnail key, duration and size metadata when updating a video to `ready`.
+- `video-service` now persists public `ready` status transitions and `video.ready.v1` outbox events atomically, using the canonical video metadata required by `feed-social-service`.
+- Updated event contract and service docs to clarify that `video-service` owns canonical lifecycle publishing while `media-worker` supplies processing asset metadata.
+- Verified with `go test ./...` in `services/video-service` and `services/media-worker`, `make smoke-product`, and a local compose upload-to-feed smoke path without internal feed seeding.
+- Notes for next session: consider replacing the current smoke script's internal feed seed with the true ready-event path now that the event handoff is implemented.
+
 ### 2026-07-07
 
 - Added production-shaped local Docker Compose wiring for the core product stack.

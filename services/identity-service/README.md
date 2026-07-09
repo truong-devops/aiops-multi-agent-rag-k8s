@@ -47,6 +47,7 @@ Public paths should be reached through `api-gateway` as `/api/v1/...`.
 | `SIGNING_KEY_PEM` | generated at startup | RSA private key for stable JWT signing. |
 | `DATABASE_URL` | empty | PostgreSQL connection string. Required outside local/dev/test. |
 | `REDIS_URL` | empty | Redis connection string for auth rate limiting. Required outside local/dev/test. |
+| `TRUST_PROXY_HEADERS` | `false` | Trust `X-Forwarded-For`/`X-Real-IP` for rate limiting and audit IPs. Enable only when requests can arrive only through a trusted proxy/gateway. |
 | `ACCESS_TOKEN_TTL` | `15m` | JWT access token lifetime. |
 | `REFRESH_TOKEN_TTL` | `168h` | Refresh token/session lifetime. |
 | `LOGIN_RATE_LIMIT` | `5` | Login attempts allowed per email/IP window. |
@@ -58,6 +59,7 @@ Public paths should be reached through `api-gateway` as `/api/v1/...`.
 | `GOOGLE_AUTH_URL` | Google default | Override for tests/local OAuth provider. |
 | `GOOGLE_TOKEN_URL` | Google default | Override for tests/local OAuth provider. |
 | `GOOGLE_JWKS_URL` | Google default | JWKS endpoint for ID token validation. |
+| `GOOGLE_ALLOWED_REDIRECT_URIS` | empty | Comma-separated OAuth redirect URI allowlist. Required outside local/dev/test when Google OAuth is enabled. |
 
 If `SIGNING_KEY_PEM` is not set, the service generates an RSA key on startup. That is fine for local development, but existing access tokens become invalid after restart.
 

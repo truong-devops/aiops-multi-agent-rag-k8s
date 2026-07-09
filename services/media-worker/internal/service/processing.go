@@ -187,7 +187,7 @@ func (s *ProcessingService) ProcessJob(ctx context.Context, claimed domain.Proce
 		s.record("attempt", "start_error")
 		return err
 	}
-	if err := s.updateVideoStatus(ctx, job, "processing", "worker_started", ""); err != nil {
+	if err := s.updateVideoStatus(ctx, job, "processing", "worker_started", "", nil); err != nil {
 		decision := DecideRetry(job, domain.ProcessingError{
 			Code:      domain.CodeVideoServiceUnavailable,
 			Message:   err.Error(),
@@ -211,7 +211,7 @@ func (s *ProcessingService) ProcessJob(ctx context.Context, claimed domain.Proce
 			return markErr
 		}
 		if decision.DeadLetter {
-			_ = s.updateVideoStatus(ctx, updated, "failed", "worker_failed", decision.ErrorCode)
+			_ = s.updateVideoStatus(ctx, updated, "failed", "worker_failed", decision.ErrorCode, nil)
 		}
 		if decision.DeadLetter {
 			s.recordAttempt("dead_letter", decision.ErrorCode)
@@ -220,7 +220,7 @@ func (s *ProcessingService) ProcessJob(ctx context.Context, claimed domain.Proce
 		}
 		return err
 	}
-	if err := s.updateVideoStatus(ctx, job, "ready", "worker_completed", ""); err != nil {
+	if err := s.updateVideoStatus(ctx, job, "ready", "worker_completed", "", &result); err != nil {
 		decision := DecideRetry(job, domain.ProcessingError{
 			Code:      domain.CodeVideoServiceUnavailable,
 			Message:   err.Error(),
@@ -307,18 +307,27 @@ func (s *ProcessingService) markFailed(ctx context.Context, job domain.Processin
 	return updated, nil
 }
 
-func (s *ProcessingService) updateVideoStatus(ctx context.Context, job domain.ProcessingJob, status string, reason string, errorCode string) error {
+func (s *ProcessingService) updateVideoStatus(ctx context.Context, job domain.ProcessingJob, status string, reason string, errorCode string, result *processor.Result) error {
 	if s.statusClient == nil {
 		return nil
 	}
-	err := s.statusClient.UpdateStatus(ctx, client.UpdateVideoStatusInput{
+	input := client.UpdateVideoStatusInput{
 		VideoID:       job.VideoID,
 		Status:        status,
 		Reason:        reason,
 		ErrorCode:     errorCode,
 		RequestID:     job.RequestID,
 		CorrelationID: job.CorrelationID,
-	})
+	}
+	if result != nil {
+		input.ProcessedObjectKey = result.ProcessedObjectKey
+		input.ThumbnailObjectKey = result.ThumbnailObjectKey
+		input.DurationMs = result.DurationMs
+		input.Width = result.Width
+		input.Height = result.Height
+		input.SizeBytes = result.SizeBytes
+	}
+	err := s.statusClient.UpdateStatus(ctx, input)
 	if err != nil {
 		s.record("video_status_update", "error")
 		return err

@@ -49,15 +49,19 @@ Published by `media-worker` when a processing attempt starts.
 
 ### `video.ready.v1`
 
-Published by `media-worker` when processed assets are available.
+Published by `video-service` after the canonical video status transitions to `ready`. `media-worker` supplies processed asset metadata through the internal video status API.
 
 ```json
 {
   "video_id": "vid_01H...",
-  "job_id": "job_01H...",
+  "owner_id": "usr_01H...",
+  "title": "Demo video",
+  "description": "Short description",
   "processed_object_key": "processed/vid_01H/output.mp4",
   "thumbnail_object_key": "thumbs/vid_01H/thumb.jpg",
-  "duration_ms": 42000
+  "duration_ms": 42000,
+  "visibility": "public",
+  "ready_at": "2026-06-11T10:03:00Z"
 }
 ```
 

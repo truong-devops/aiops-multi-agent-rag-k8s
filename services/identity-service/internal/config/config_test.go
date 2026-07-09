@@ -65,6 +65,21 @@ func TestValidateRejectsInvalidTokenTTL(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresGoogleRedirectAllowlistOutsideLocal(t *testing.T) {
+	cfg := validConfig("production")
+	cfg.GoogleClientID = "google-client"
+	cfg.GoogleClientSecret = "google-secret"
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing Google redirect allowlist error")
+	}
+
+	cfg.GoogleAllowedRedirectURIs = []string{"https://app.example.com/auth/google/callback"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestValidateRejectsMissingIssuer(t *testing.T) {
 	cfg := validConfig("local")
 	cfg.Issuer = ""

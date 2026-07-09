@@ -118,6 +118,17 @@ func (s *MemoryStore) SaveVideoStatus(_ context.Context, video domain.Video, his
 	return nil
 }
 
+func (s *MemoryStore) SaveVideoStatusWithOutbox(_ context.Context, video domain.Video, history domain.StatusHistory, outbox domain.OutboxEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.videos[video.ID] = video
+	s.statusHistory = append(s.statusHistory, history)
+	if outbox.ID != "" {
+		s.outboxEvents = append(s.outboxEvents, outbox)
+	}
+	return nil
+}
+
 func (s *MemoryStore) Ping(context.Context) error {
 	return nil
 }

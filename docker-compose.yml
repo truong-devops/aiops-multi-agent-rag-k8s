@@ -10,12 +10,12 @@ x-product-env: &product-env
 
 x-postgres-env: &postgres-env
   POSTGRES_USER: ${POSTGRES_USER:-aiops}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aiops}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for compose}
   POSTGRES_DB: ${POSTGRES_DB:-postgres}
 
 x-minio-env: &minio-env
-  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set for compose}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set for compose}
 
 services:
   postgres:
@@ -23,7 +23,7 @@ services:
     environment:
       <<: *postgres-env
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./deploy/docker-compose/postgres-init:/docker-entrypoint-initdb.d:ro
@@ -41,7 +41,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD:-aiops}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for compose}
     volumes:
       - ./services/identity-service/migrations:/migrations/identity:ro
       - ./services/video-service/migrations:/migrations/video:ro
@@ -73,7 +73,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -89,8 +89,8 @@ services:
     environment:
       <<: *minio-env
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -141,8 +141,8 @@ services:
       - --advertise-kafka-addr
       - PLAINTEXT://redpanda:9092
     ports:
-      - "${REDPANDA_BROKER_PORT:-9092}:9092"
-      - "${REDPANDA_ADMIN_PORT:-9644}:9644"
+      - "127.0.0.1:${REDPANDA_BROKER_PORT:-9092}:9092"
+      - "127.0.0.1:${REDPANDA_ADMIN_PORT:-9644}:9644"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
     healthcheck:
@@ -156,16 +156,16 @@ services:
   mediamtx:
     image: bluenviron/mediamtx:1.12.3
     ports:
-      - "${MEDIAMTX_RTMP_PORT:-1935}:1935"
-      - "${MEDIAMTX_RTSP_PORT:-8554}:8554"
-      - "${MEDIAMTX_HLS_PORT:-8888}:8888"
+      - "127.0.0.1:${MEDIAMTX_RTMP_PORT:-1935}:1935"
+      - "127.0.0.1:${MEDIAMTX_RTSP_PORT:-8554}:8554"
+      - "127.0.0.1:${MEDIAMTX_HLS_PORT:-8888}:8888"
     restart: unless-stopped
 
   qdrant:
     image: qdrant/qdrant:v1.14.1
     ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+      - "127.0.0.1:${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
@@ -184,14 +184,14 @@ services:
       <<: *common-env
       ENVIRONMENT: ${IDENTITY_ENVIRONMENT:-local}
       PORT: "8080"
-      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/identity_db?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for compose}@postgres:5432/identity_db?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       JWT_ISSUER: ${JWT_ISSUER:-aiops-video-platform}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-aiops-api}
       ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
       REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-168h}
     ports:
-      - "${IDENTITY_SERVICE_PORT:-8081}:8080"
+      - "127.0.0.1:${IDENTITY_SERVICE_PORT:-8081}:8080"
     restart: unless-stopped
 
   video-service:
@@ -209,12 +209,12 @@ services:
     environment:
       <<: *product-env
       PORT: "8080"
-      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/video_db?sslmode=disable
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for compose}@postgres:5432/video_db?sslmode=disable
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN must be set for compose}
       RAW_VIDEO_BUCKET: raw-videos
       MINIO_ENDPOINT: ${VIDEO_MINIO_ENDPOINT:-localhost:9000}
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set for compose}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set for compose}
       MINIO_REGION: us-east-1
       MINIO_USE_SSL: "false"
       VERIFY_UPLOAD_OBJECT: ${VERIFY_UPLOAD_OBJECT:-false}
@@ -224,7 +224,7 @@ services:
       OUTBOX_POLL_INTERVAL: 5s
       OUTBOX_BATCH_SIZE: 25
     ports:
-      - "${VIDEO_SERVICE_PORT:-8082}:8080"
+      - "127.0.0.1:${VIDEO_SERVICE_PORT:-8082}:8080"
     restart: unless-stopped
 
   media-worker:
@@ -244,7 +244,7 @@ services:
     environment:
       <<: *product-env
       PORT: "8080"
-      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/media_db?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for compose}@postgres:5432/media_db?sslmode=disable
       KAFKA_BROKERS: redpanda:9092
       VIDEO_EVENTS_TOPIC: video.events
       MEDIA_EVENTS_TOPIC: media.events
@@ -252,10 +252,10 @@ services:
       CONSUMER_ENABLED: "true"
       RUNNER_ENABLED: "true"
       VIDEO_SERVICE_BASE_URL: http://video-service:8080
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN must be set for compose}
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set for compose}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set for compose}
       MINIO_REGION: us-east-1
       MINIO_USE_SSL: "false"
       RAW_VIDEO_BUCKET: raw-videos
@@ -265,7 +265,7 @@ services:
       FFMPEG_PATH: ffmpeg
       FFPROBE_PATH: ffprobe
     ports:
-      - "${MEDIA_WORKER_PORT:-8086}:8080"
+      - "127.0.0.1:${MEDIA_WORKER_PORT:-8086}:8080"
     restart: unless-stopped
 
   feed-social-service:
@@ -283,17 +283,17 @@ services:
     environment:
       <<: *product-env
       PORT: "8080"
-      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/feed_social_db?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for compose}@postgres:5432/feed_social_db?sslmode=disable
       KAFKA_BROKERS: redpanda:9092
       VIDEO_EVENTS_TOPIC: video.events
       CONSUMER_GROUP: feed-social-service
       CONSUMER_ENABLED: "true"
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-dev-internal-token}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN must be set for compose}
       REDIS_URL: redis://redis:6379/1
       CACHE_ENABLED: "true"
       FEED_CACHE_TTL: 60s
     ports:
-      - "${FEED_SERVICE_PORT:-8083}:8080"
+      - "127.0.0.1:${FEED_SERVICE_PORT:-8083}:8080"
     restart: unless-stopped
 
   live-service:
@@ -309,11 +309,11 @@ services:
     environment:
       <<: *product-env
       PORT: "8080"
-      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:-aiops}@postgres:5432/live_db?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-aiops}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for compose}@postgres:5432/live_db?sslmode=disable
       LIVE_INGEST_BASE_URL: rtmp://localhost:${MEDIAMTX_RTMP_PORT:-1935}/live
       LIVE_PLAYBACK_BASE_URL: http://localhost:${MEDIAMTX_HLS_PORT:-8888}/live
     ports:
-      - "${LIVE_SERVICE_PORT:-8084}:8080"
+      - "127.0.0.1:${LIVE_SERVICE_PORT:-8084}:8080"
     restart: unless-stopped
 
   api-gateway:
@@ -346,7 +346,7 @@ services:
       AUTH_REQUIRED_PREFIXES: /api/v1/users,/api/v1/videos,/api/v1/comments,/api/v1/live-sessions,/api/v1/incidents
       UPSTREAM_TIMEOUT: 15s
     ports:
-      - "${API_GATEWAY_PORT:-8080}:8080"
+      - "${API_GATEWAY_BIND_ADDRESS:-0.0.0.0}:${API_GATEWAY_PORT:-8080}:8080"
     restart: unless-stopped
 
   aiops-service:
@@ -363,7 +363,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-compose}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
-      - "${AIOPS_SERVICE_PORT:-8085}:8080"
+      - "127.0.0.1:${AIOPS_SERVICE_PORT:-8085}:8080"
     restart: unless-stopped
 
   postgres-test:
@@ -375,7 +375,7 @@ services:
       POSTGRES_PASSWORD: video
       POSTGRES_DB: video_test
     ports:
-      - "${POSTGRES_TEST_PORT:-55432}:5432"
+      - "127.0.0.1:${POSTGRES_TEST_PORT:-55432}:5432"
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
     healthcheck:
@@ -393,7 +393,7 @@ services:
       POSTGRES_PASSWORD: media
       POSTGRES_DB: media_test
     ports:
-      - "${POSTGRES_MEDIA_TEST_PORT:-55433}:5432"
+      - "127.0.0.1:${POSTGRES_MEDIA_TEST_PORT:-55433}:5432"
     volumes:
       - postgres_media_test_data:/var/lib/postgresql/data
     healthcheck:

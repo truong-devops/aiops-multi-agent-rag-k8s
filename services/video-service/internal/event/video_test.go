@@ -54,3 +54,52 @@ func TestNewVideoUploadedOutbox(t *testing.T) {
 		t.Fatal("envelope payload is empty")
 	}
 }
+
+func TestNewVideoReadyOutbox(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	publishedAt := now.Add(-time.Minute)
+	event, err := NewVideoReadyOutbox(domain.Video{
+		ID:                 "vid_123",
+		OwnerID:            "usr_123",
+		Title:              "Launch video",
+		Description:        "demo",
+		Visibility:         domain.VisibilityPublic,
+		ProcessedObjectKey: "processed/vid_123/source.mp4",
+		ThumbnailObjectKey: "thumbnails/vid_123/poster.jpg",
+		DurationMs:         42000,
+		PublishedAt:        &publishedAt,
+		LastRequestID:      "req_123",
+		LastCorrelationID:  "corr_123",
+	}, "dev", now)
+	if err != nil {
+		t.Fatalf("NewVideoReadyOutbox() error = %v", err)
+	}
+	if event.EventName != VideoReadyName || event.EventVersion != VideoReadyVersion {
+		t.Fatalf("event name/version = %s/%s", event.EventName, event.EventVersion)
+	}
+	if event.Status != domain.OutboxStatusPending {
+		t.Fatalf("status = %q, want pending", event.Status)
+	}
+
+	var payload VideoReadyPayload
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.VideoID != "vid_123" || payload.OwnerID != "usr_123" || payload.ProcessedObjectKey == "" {
+		t.Fatalf("payload = %#v", payload)
+	}
+	if payload.Title != "Launch video" || payload.Visibility != domain.VisibilityPublic {
+		t.Fatalf("metadata payload = %#v", payload)
+	}
+	if payload.ReadyAt != publishedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("ready_at = %q", payload.ReadyAt)
+	}
+
+	envelope, err := NewEnvelope(event)
+	if err != nil {
+		t.Fatalf("NewEnvelope() error = %v", err)
+	}
+	if envelope.EventType != VideoReadyFullName {
+		t.Fatalf("event_type = %q", envelope.EventType)
+	}
+}

@@ -19,6 +19,8 @@ Kubernetes vẫn là mục tiêu triển khai chính. Compose chỉ phục vụ 
 Validate compose:
 
 ```bash
+cp .env.example .env
+# edit INTERNAL_API_TOKEN and local passwords before starting
 make compose-config
 ```
 
@@ -46,8 +48,16 @@ Follow logs:
 make compose-logs
 ```
 
+Run the gateway-level product backend smoke test:
+
+```bash
+make smoke-product
+```
+
 Important local notes:
 
+- Compose requires `INTERNAL_API_TOKEN`; generate a local value with `openssl rand -base64 32` and put it in `.env`.
+- Product dependencies and internal services are bound to `127.0.0.1` where possible. Public client traffic should go through `api-gateway` on `API_GATEWAY_PORT`.
 - PostgreSQL database creation scripts under `deploy/docker-compose/postgres-init` only run when the `postgres_data` volume is created the first time. If database names change, run `docker compose down -v` before starting again.
 - `identity-service` uses `ENVIRONMENT=local` by default in compose so it can generate an ephemeral JWT key without committing a development private key. It still uses PostgreSQL and Redis because `DATABASE_URL` and `REDIS_URL` are set.
 - `video-service` uses `VIDEO_MINIO_ENDPOINT=localhost:9000` by default so presigned upload URLs are usable from the host browser. If `VERIFY_UPLOAD_OBJECT=true`, set `VIDEO_MINIO_ENDPOINT=minio:9000` or provide networking that lets the service reach the same endpoint it signs.

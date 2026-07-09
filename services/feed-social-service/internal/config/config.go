@@ -70,6 +70,9 @@ func (c Config) Validate() error {
 	if !c.IsLocal() && strings.TrimSpace(c.DatabaseURL) == "" {
 		return fmt.Errorf("DATABASE_URL is required when ENVIRONMENT=%s", c.Environment)
 	}
+	if !c.IsLocal() && strings.TrimSpace(c.InternalAPIToken) == "" {
+		return fmt.Errorf("INTERNAL_API_TOKEN is required when ENVIRONMENT=%s", c.Environment)
+	}
 	if c.ConsumerEnabled {
 		if len(c.KafkaBrokers) == 0 {
 			return fmt.Errorf("KAFKA_BROKERS is required when CONSUMER_ENABLED=true")

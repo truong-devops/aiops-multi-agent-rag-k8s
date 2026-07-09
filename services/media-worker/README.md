@@ -82,13 +82,13 @@ Implemented now:
 - Retry/backoff policy and stable processing error codes.
 - Operational metrics for job status, runnable queue age/depth, attempt outcome/error code, database operations, MinIO operations, video-service status updates and observed `video.uploaded.v1` event age.
 - Structured logs that include service, environment, worker, job, attempt, video, request, correlation and error-code context on worker paths.
-- Lifecycle event contract builders for `video.processing_started.v1`, `video.ready.v1`, and `video.processing_failed.v1`; direct worker publishing is deferred while `video-service` remains the canonical lifecycle event producer.
+- Lifecycle event contract builders for `video.processing_started.v1`, `video.ready.v1`, and `video.processing_failed.v1`; direct worker publishing is deferred while `video-service` remains the canonical lifecycle event producer. On successful processing, the worker sends processed asset metadata to `video-service`, which publishes the canonical `video.ready.v1` event.
 - Unit tests and skipped-by-default PostgreSQL integration harness.
 - FFmpeg smoke test behind the `smoke` build tag.
 
 Still pending:
 
-- Direct media-worker lifecycle outbox/publisher only if downstream requirements need worker-owned lifecycle events.
+- Direct media-worker lifecycle outbox/publisher only if downstream requirements need worker-owned lifecycle events beyond the canonical `video-service` lifecycle stream.
 - Kubernetes/GitOps manifests and resource sizing for CPU-heavy FFmpeg work.
 - Full compose smoke test from upload event to processing status update.
 - Redis locks/idempotency cache, if needed after PostgreSQL behavior is stable.

@@ -64,16 +64,22 @@ func main() {
 		}),
 	)
 	googleService := service.NewGoogleOAuthService(store, service.GoogleOAuthConfig{
-		ClientID:     cfg.GoogleClientID,
-		ClientSecret: cfg.GoogleClientSecret,
-		AuthURL:      cfg.GoogleAuthURL,
-		TokenURL:     cfg.GoogleTokenURL,
-		JWKSURL:      cfg.GoogleJWKSURL,
-		Scopes:       cfg.GoogleScopes,
+		ClientID:            cfg.GoogleClientID,
+		ClientSecret:        cfg.GoogleClientSecret,
+		AuthURL:             cfg.GoogleAuthURL,
+		TokenURL:            cfg.GoogleTokenURL,
+		JWKSURL:             cfg.GoogleJWKSURL,
+		Scopes:              cfg.GoogleScopes,
+		AllowedRedirectURIs: cfg.GoogleAllowedRedirectURIs,
 	})
 
 	mux := http.NewServeMux()
-	handler.New(authService, googleService, combineReadiness(readiness, limiterReadiness)).RegisterRoutes(mux)
+	handler.New(
+		authService,
+		googleService,
+		combineReadiness(readiness, limiterReadiness),
+		handler.Options{TrustProxyHeaders: cfg.TrustProxyHeaders},
+	).RegisterRoutes(mux)
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,

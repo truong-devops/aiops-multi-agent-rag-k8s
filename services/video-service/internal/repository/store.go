@@ -22,6 +22,7 @@ type Store interface {
 	SaveUploadRequest(ctx context.Context, upload domain.UploadRequest) error
 	CompleteUpload(ctx context.Context, upload domain.UploadRequest, video domain.Video, history domain.StatusHistory, outbox domain.OutboxEvent) error
 	SaveVideoStatus(ctx context.Context, video domain.Video, history domain.StatusHistory) error
+	SaveVideoStatusWithOutbox(ctx context.Context, video domain.Video, history domain.StatusHistory, outbox domain.OutboxEvent) error
 	ListPendingOutboxEvents(ctx context.Context, limit int) ([]domain.OutboxEvent, error)
 	MarkOutboxPublished(ctx context.Context, id string, publishedAt time.Time) error
 	MarkOutboxFailed(ctx context.Context, id string, errMessage string) error

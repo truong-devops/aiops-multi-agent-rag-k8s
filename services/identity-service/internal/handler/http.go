@@ -16,17 +16,30 @@ import (
 )
 
 type Handler struct {
-	auth      *service.AuthService
-	google    *service.GoogleOAuthService
-	readiness func(context.Context) error
+	auth              *service.AuthService
+	google            *service.GoogleOAuthService
+	readiness         func(context.Context) error
+	trustProxyHeaders bool
 }
 
-func New(auth *service.AuthService, google *service.GoogleOAuthService, readiness ...func(context.Context) error) *Handler {
+type Options struct {
+	TrustProxyHeaders bool
+}
+
+func New(auth *service.AuthService, google *service.GoogleOAuthService, args ...any) *Handler {
 	ready := func(context.Context) error { return nil }
-	if len(readiness) > 0 && readiness[0] != nil {
-		ready = readiness[0]
+	var options Options
+	for _, arg := range args {
+		switch value := arg.(type) {
+		case func(context.Context) error:
+			if value != nil {
+				ready = value
+			}
+		case Options:
+			options = value
+		}
 	}
-	return &Handler{auth: auth, google: google, readiness: ready}
+	return &Handler{auth: auth, google: google, readiness: ready, trustProxyHeaders: options.TrustProxyHeaders}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -76,7 +89,7 @@ func (h *Handler) register(w http.ResponseWriter, req *http.Request) {
 		Username:    body.Username,
 		DisplayName: body.DisplayName,
 		Password:    body.Password,
-		IPAddress:   clientIP(req),
+		IPAddress:   h.clientIP(req),
 		UserAgent:   req.UserAgent(),
 	})
 	if err != nil {
@@ -100,7 +113,7 @@ func (h *Handler) login(w http.ResponseWriter, req *http.Request) {
 	result, err := h.auth.Login(req.Context(), service.LoginInput{
 		Email:     body.Email,
 		Password:  body.Password,
-		IPAddress: clientIP(req),
+		IPAddress: h.clientIP(req),
 		UserAgent: req.UserAgent(),
 	})
 	if err != nil {
@@ -207,7 +220,7 @@ func (h *Handler) googleCallback(w http.ResponseWriter, req *http.Request) {
 		Code:        req.URL.Query().Get("code"),
 		State:       req.URL.Query().Get("state"),
 		RedirectURI: redirectURI,
-		IPAddress:   clientIP(req),
+		IPAddress:   h.clientIP(req),
 		UserAgent:   req.UserAgent(),
 	})
 	if err != nil {
@@ -219,7 +232,7 @@ func (h *Handler) googleCallback(w http.ResponseWriter, req *http.Request) {
 		writeError(w, req, err)
 		return
 	}
-	result, err := h.auth.IssueForOAuthUser(req.Context(), user, req.UserAgent(), clientIP(req))
+	result, err := h.auth.IssueForOAuthUser(req.Context(), user, req.UserAgent(), h.clientIP(req))
 	if err != nil {
 		writeError(w, req, err)
 		return
@@ -245,7 +258,7 @@ func (h *Handler) googleToken(w http.ResponseWriter, req *http.Request) {
 		State:        body.State,
 		CodeVerifier: body.CodeVerifier,
 		RedirectURI:  body.RedirectURI,
-		IPAddress:    clientIP(req),
+		IPAddress:    h.clientIP(req),
 		UserAgent:    req.UserAgent(),
 	})
 	if err != nil {
@@ -257,7 +270,7 @@ func (h *Handler) googleToken(w http.ResponseWriter, req *http.Request) {
 		writeError(w, req, err)
 		return
 	}
-	result, err := h.auth.IssueForOAuthUser(req.Context(), user, req.UserAgent(), clientIP(req))
+	result, err := h.auth.IssueForOAuthUser(req.Context(), user, req.UserAgent(), h.clientIP(req))
 	if err != nil {
 		writeError(w, req, err)
 		return
@@ -341,14 +354,20 @@ func methodNotAllowed(w http.ResponseWriter, req *http.Request) {
 	writeError(w, req, domain.NewError(http.StatusMethodNotAllowed, domain.CodeMethodNotAllowed, "HTTP method is not allowed for this route."))
 }
 
-func clientIP(req *http.Request) string {
-	if forwardedFor := req.Header.Get("X-Forwarded-For"); forwardedFor != "" {
-		if ip := cleanIP(strings.Split(forwardedFor, ",")[0]); ip != "" {
-			return ip
+func (h *Handler) clientIP(req *http.Request) string {
+	return clientIP(req, h.trustProxyHeaders)
+}
+
+func clientIP(req *http.Request, trustProxyHeaders bool) string {
+	if trustProxyHeaders {
+		if forwardedFor := req.Header.Get("X-Forwarded-For"); forwardedFor != "" {
+			if ip := cleanIP(strings.Split(forwardedFor, ",")[0]); ip != "" {
+				return ip
+			}
 		}
-	}
-	if realIP := cleanIP(req.Header.Get("X-Real-IP")); realIP != "" {
-		return realIP
+		if realIP := cleanIP(req.Header.Get("X-Real-IP")); realIP != "" {
+			return realIP
+		}
 	}
 	host, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err == nil {

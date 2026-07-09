@@ -193,21 +193,33 @@ func (h *Handler) updateStatus(w http.ResponseWriter, req *http.Request, videoID
 		return
 	}
 	var body struct {
-		Status    string `json:"status"`
-		Reason    string `json:"reason"`
-		ErrorCode string `json:"error_code"`
+		Status             string `json:"status"`
+		Reason             string `json:"reason"`
+		ErrorCode          string `json:"error_code"`
+		ProcessedObjectKey string `json:"processed_object_key"`
+		ThumbnailObjectKey string `json:"thumbnail_object_key"`
+		DurationMs         int64  `json:"duration_ms"`
+		Width              int    `json:"width"`
+		Height             int    `json:"height"`
+		SizeBytes          int64  `json:"size_bytes"`
 	}
 	if !decodeJSON(w, req, &body) {
 		return
 	}
 	video, err := h.videos.UpdateStatus(req.Context(), service.UpdateStatusInput{
-		VideoID:       videoID,
-		Status:        body.Status,
-		Reason:        body.Reason,
-		ErrorCode:     body.ErrorCode,
-		Actor:         actorFromRequest(req, h.internalAPIToken),
-		RequestID:     observability.RequestIDFromContext(req.Context()),
-		CorrelationID: observability.CorrelationIDFromContext(req.Context()),
+		VideoID:            videoID,
+		Status:             body.Status,
+		Reason:             body.Reason,
+		ErrorCode:          body.ErrorCode,
+		ProcessedObjectKey: body.ProcessedObjectKey,
+		ThumbnailObjectKey: body.ThumbnailObjectKey,
+		DurationMs:         body.DurationMs,
+		Width:              body.Width,
+		Height:             body.Height,
+		SizeBytes:          body.SizeBytes,
+		Actor:              actorFromRequest(req, h.internalAPIToken),
+		RequestID:          observability.RequestIDFromContext(req.Context()),
+		CorrelationID:      observability.CorrelationIDFromContext(req.Context()),
 	})
 	if err != nil {
 		writeError(w, req, err)

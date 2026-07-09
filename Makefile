@@ -1,6 +1,6 @@
 SHELL := /bin/sh
 
-.PHONY: help tree doctor status compose-config compose-up compose-up-aiops compose-down compose-logs test-video test-video-integration test-media test-media-integration test-live smoke-media-ffmpeg compose-test-db-up compose-test-db-down compose-media-test-db-up compose-media-test-db-down
+.PHONY: help tree doctor status compose-config compose-up compose-up-aiops compose-down compose-logs test-video test-video-integration test-media test-media-integration test-live smoke-product smoke-media-ffmpeg compose-test-db-up compose-test-db-down compose-media-test-db-up compose-media-test-db-down
 
 help:
 	@echo "Available targets:"
@@ -17,6 +17,7 @@ help:
 	@echo "  make test-media             - Run media-worker tests"
 	@echo "  make test-media-integration - Run media-worker PostgreSQL integration tests"
 	@echo "  make test-live              - Run live-service tests"
+	@echo "  make smoke-product          - Run gateway-level product backend smoke test"
 	@echo "  make smoke-media-ffmpeg     - Run media-worker FFmpeg smoke test"
 
 tree:
@@ -61,6 +62,9 @@ test-media:
 
 test-live:
 	@cd services/live-service && go test ./...
+
+smoke-product:
+	@scripts/smoke/product-smoke.sh
 
 compose-test-db-up:
 	@docker compose --profile test up -d postgres-test

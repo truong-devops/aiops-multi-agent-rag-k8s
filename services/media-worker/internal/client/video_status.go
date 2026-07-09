@@ -15,12 +15,18 @@ type VideoStatusClient interface {
 }
 
 type UpdateVideoStatusInput struct {
-	VideoID       string
-	Status        string
-	Reason        string
-	ErrorCode     string
-	RequestID     string
-	CorrelationID string
+	VideoID            string
+	Status             string
+	Reason             string
+	ErrorCode          string
+	ProcessedObjectKey string
+	ThumbnailObjectKey string
+	DurationMs         int64
+	Width              int
+	Height             int
+	SizeBytes          int64
+	RequestID          string
+	CorrelationID      string
 }
 
 type HTTPVideoStatusClient struct {
@@ -58,10 +64,28 @@ func (c *HTTPVideoStatusClient) UpdateStatus(ctx context.Context, input UpdateVi
 	if strings.TrimSpace(input.VideoID) == "" {
 		return fmt.Errorf("video_id is required")
 	}
-	body := map[string]string{
+	body := map[string]any{
 		"status":     strings.TrimSpace(input.Status),
 		"reason":     strings.TrimSpace(input.Reason),
 		"error_code": strings.TrimSpace(input.ErrorCode),
+	}
+	if strings.TrimSpace(input.ProcessedObjectKey) != "" {
+		body["processed_object_key"] = strings.TrimSpace(input.ProcessedObjectKey)
+	}
+	if strings.TrimSpace(input.ThumbnailObjectKey) != "" {
+		body["thumbnail_object_key"] = strings.TrimSpace(input.ThumbnailObjectKey)
+	}
+	if input.DurationMs > 0 {
+		body["duration_ms"] = input.DurationMs
+	}
+	if input.Width > 0 {
+		body["width"] = input.Width
+	}
+	if input.Height > 0 {
+		body["height"] = input.Height
+	}
+	if input.SizeBytes > 0 {
+		body["size_bytes"] = input.SizeBytes
 	}
 	rawBody, err := json.Marshal(body)
 	if err != nil {

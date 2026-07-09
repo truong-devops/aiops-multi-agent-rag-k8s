@@ -220,6 +220,10 @@ func (s *PostgresStore) CompleteUpload(ctx context.Context, upload domain.Upload
 }
 
 func (s *PostgresStore) SaveVideoStatus(ctx context.Context, video domain.Video, history domain.StatusHistory) error {
+	return s.SaveVideoStatusWithOutbox(ctx, video, history, domain.OutboxEvent{})
+}
+
+func (s *PostgresStore) SaveVideoStatusWithOutbox(ctx context.Context, video domain.Video, history domain.StatusHistory, outbox domain.OutboxEvent) error {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
@@ -231,6 +235,11 @@ func (s *PostgresStore) SaveVideoStatus(ctx context.Context, video domain.Video,
 	}
 	if err := insertStatusHistory(ctx, tx, history); err != nil {
 		return err
+	}
+	if outbox.ID != "" {
+		if err := insertOutboxEvent(ctx, tx, outbox); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

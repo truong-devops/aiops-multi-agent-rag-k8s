@@ -14,12 +14,18 @@ func TestValidateAllowsLocalWithoutDatabase(t *testing.T) {
 	}
 }
 
-func TestValidateRequiresProductionDatabase(t *testing.T) {
+func TestValidateRequiresProductionDatabaseAndInternalToken(t *testing.T) {
 	cfg := validConfig("production")
 	cfg.DatabaseURL = ""
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() error = nil, want missing DATABASE_URL error")
+	}
+
+	cfg.DatabaseURL = "postgres://feed:feed@postgres:5432/feed_social_db?sslmode=disable"
+	cfg.InternalAPIToken = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() error = nil, want missing INTERNAL_API_TOKEN error")
 	}
 }
 
@@ -80,6 +86,7 @@ func validConfig(environment string) Config {
 		Port:                  "8080",
 		Environment:           environment,
 		DatabaseURL:           "postgres://feed:feed@postgres:5432/feed_social_db?sslmode=disable",
+		InternalAPIToken:      "internal-secret",
 		VideoEventsTopic:      "video-events",
 		ConsumerGroup:         "feed-social-service",
 		FeedCacheTTL:          time.Minute,

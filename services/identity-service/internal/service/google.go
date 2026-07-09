@@ -22,12 +22,13 @@ import (
 )
 
 type GoogleOAuthConfig struct {
-	ClientID     string
-	ClientSecret string
-	AuthURL      string
-	TokenURL     string
-	JWKSURL      string
-	Scopes       []string
+	ClientID            string
+	ClientSecret        string
+	AuthURL             string
+	TokenURL            string
+	JWKSURL             string
+	Scopes              []string
+	AllowedRedirectURIs []string
 }
 
 type GoogleOAuthService struct {
@@ -75,6 +76,9 @@ func (s *GoogleOAuthService) Start(ctx context.Context, redirectURI string) (Goo
 	redirectURI = strings.TrimSpace(redirectURI)
 	if redirectURI == "" {
 		return GoogleStartResult{}, domain.ValidationError("redirect_uri is required.")
+	}
+	if !s.redirectAllowed(redirectURI) {
+		return GoogleStartResult{}, domain.ValidationError("redirect_uri is not allowed.")
 	}
 
 	now := s.now()
@@ -178,6 +182,18 @@ func (s *GoogleOAuthService) UpsertIdentity(ctx context.Context, identity Google
 
 func (s *GoogleOAuthService) configured() bool {
 	return strings.TrimSpace(s.config.ClientID) != "" && strings.TrimSpace(s.config.ClientSecret) != ""
+}
+
+func (s *GoogleOAuthService) redirectAllowed(redirectURI string) bool {
+	if len(s.config.AllowedRedirectURIs) == 0 {
+		return true
+	}
+	for _, allowed := range s.config.AllowedRedirectURIs {
+		if strings.TrimSpace(allowed) == redirectURI {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *GoogleOAuthService) exchangeCode(ctx context.Context, code string, codeVerifier string, redirectURI string) (string, error) {

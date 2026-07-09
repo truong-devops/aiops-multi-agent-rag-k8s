@@ -117,6 +117,7 @@ func TestConfirmUploadedVerifiesObjectMetadata(t *testing.T) {
 	intent, err := service.CreateUploadRequest(context.Background(), CreateUploadRequestInput{
 		OwnerID:     "usr_123",
 		Title:       "Launch video",
+		Visibility:  domain.VisibilityPublic,
 		ContentType: "video/mp4",
 		Actor:       Actor{UserID: "usr_123"},
 	})
@@ -152,6 +153,7 @@ func TestConfirmUploadedRejectsObjectMetadataMismatch(t *testing.T) {
 	intent, err := service.CreateUploadRequest(context.Background(), CreateUploadRequestInput{
 		OwnerID:     "usr_123",
 		Title:       "Launch video",
+		Visibility:  domain.VisibilityPublic,
 		ContentType: "video/mp4",
 		Actor:       Actor{UserID: "usr_123"},
 	})
@@ -176,6 +178,7 @@ func TestInternalActorCanDriveProcessingStatusFlow(t *testing.T) {
 	intent, err := service.CreateUploadRequest(context.Background(), CreateUploadRequestInput{
 		OwnerID:     "usr_123",
 		Title:       "Launch video",
+		Visibility:  domain.VisibilityPublic,
 		ContentType: "video/mp4",
 		Actor:       Actor{UserID: "usr_123"},
 	})
@@ -200,16 +203,33 @@ func TestInternalActorCanDriveProcessingStatusFlow(t *testing.T) {
 		t.Fatalf("UpdateStatus(processing) error = %v", err)
 	}
 	ready, err := service.UpdateStatus(context.Background(), UpdateStatusInput{
-		VideoID: processing.ID,
-		Status:  domain.VideoStatusReady,
-		Reason:  "worker_completed",
-		Actor:   Actor{Internal: true},
+		VideoID:            processing.ID,
+		Status:             domain.VideoStatusReady,
+		Reason:             "worker_completed",
+		ProcessedObjectKey: "processed/" + processing.ID + "/source.mp4",
+		ThumbnailObjectKey: "thumbnails/" + processing.ID + "/poster.jpg",
+		DurationMs:         42000,
+		Actor:              Actor{Internal: true},
 	})
 	if err != nil {
 		t.Fatalf("UpdateStatus(ready) error = %v", err)
 	}
 	if ready.Status != domain.VideoStatusReady {
 		t.Fatalf("ready status = %q", ready.Status)
+	}
+	events := store.OutboxEvents()
+	if len(events) != 2 {
+		t.Fatalf("outbox events = %d, want 2", len(events))
+	}
+	if events[1].EventName != event.VideoReadyName || events[1].EventVersion != event.VideoReadyVersion {
+		t.Fatalf("ready event = %s/%s", events[1].EventName, events[1].EventVersion)
+	}
+	var payload event.VideoReadyPayload
+	if err := json.Unmarshal(events[1].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal ready payload: %v", err)
+	}
+	if payload.VideoID != ready.ID || payload.OwnerID != "usr_123" || payload.ProcessedObjectKey == "" {
+		t.Fatalf("ready payload = %#v", payload)
 	}
 }
 

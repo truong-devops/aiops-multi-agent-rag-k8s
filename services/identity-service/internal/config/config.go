@@ -10,52 +10,56 @@ import (
 )
 
 type Config struct {
-	Port            string
-	LogLevel        slog.Level
-	Environment     string
-	Issuer          string
-	Audience        string
-	SigningKeyPEM   string
-	DatabaseURL     string
-	RedisURL        string
-	AccessTokenTTL  time.Duration
-	RefreshTokenTTL time.Duration
+	Port              string
+	LogLevel          slog.Level
+	Environment       string
+	Issuer            string
+	Audience          string
+	SigningKeyPEM     string
+	DatabaseURL       string
+	RedisURL          string
+	TrustProxyHeaders bool
+	AccessTokenTTL    time.Duration
+	RefreshTokenTTL   time.Duration
 
 	LoginRateLimit          int64
 	LoginRateLimitWindow    time.Duration
 	RegisterRateLimit       int64
 	RegisterRateLimitWindow time.Duration
 
-	GoogleClientID     string
-	GoogleClientSecret string
-	GoogleAuthURL      string
-	GoogleTokenURL     string
-	GoogleJWKSURL      string
-	GoogleScopes       []string
+	GoogleClientID            string
+	GoogleClientSecret        string
+	GoogleAuthURL             string
+	GoogleTokenURL            string
+	GoogleJWKSURL             string
+	GoogleScopes              []string
+	GoogleAllowedRedirectURIs []string
 }
 
 func Load() Config {
 	return Config{
-		Port:                    getenv("PORT", "8080"),
-		LogLevel:                parseLogLevel(getenv("LOG_LEVEL", "info")),
-		Environment:             getenv("ENVIRONMENT", "local"),
-		Issuer:                  getenv("JWT_ISSUER", "aiops-video-platform"),
-		Audience:                getenv("JWT_AUDIENCE", "aiops-api"),
-		SigningKeyPEM:           os.Getenv("SIGNING_KEY_PEM"),
-		DatabaseURL:             os.Getenv("DATABASE_URL"),
-		RedisURL:                os.Getenv("REDIS_URL"),
-		AccessTokenTTL:          durationEnv("ACCESS_TOKEN_TTL", 15*time.Minute),
-		RefreshTokenTTL:         durationEnv("REFRESH_TOKEN_TTL", 7*24*time.Hour),
-		LoginRateLimit:          int64Env("LOGIN_RATE_LIMIT", 5),
-		LoginRateLimitWindow:    durationEnv("LOGIN_RATE_LIMIT_WINDOW", 15*time.Minute),
-		RegisterRateLimit:       int64Env("REGISTER_RATE_LIMIT", 10),
-		RegisterRateLimitWindow: durationEnv("REGISTER_RATE_LIMIT_WINDOW", 15*time.Minute),
-		GoogleClientID:          os.Getenv("GOOGLE_CLIENT_ID"),
-		GoogleClientSecret:      os.Getenv("GOOGLE_CLIENT_SECRET"),
-		GoogleAuthURL:           getenv("GOOGLE_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth"),
-		GoogleTokenURL:          getenv("GOOGLE_TOKEN_URL", "https://oauth2.googleapis.com/token"),
-		GoogleJWKSURL:           getenv("GOOGLE_JWKS_URL", "https://www.googleapis.com/oauth2/v3/certs"),
-		GoogleScopes:            parseCSV(getenv("GOOGLE_SCOPES", "openid,email,profile")),
+		Port:                      getenv("PORT", "8080"),
+		LogLevel:                  parseLogLevel(getenv("LOG_LEVEL", "info")),
+		Environment:               getenv("ENVIRONMENT", "local"),
+		Issuer:                    getenv("JWT_ISSUER", "aiops-video-platform"),
+		Audience:                  getenv("JWT_AUDIENCE", "aiops-api"),
+		SigningKeyPEM:             os.Getenv("SIGNING_KEY_PEM"),
+		DatabaseURL:               os.Getenv("DATABASE_URL"),
+		RedisURL:                  os.Getenv("REDIS_URL"),
+		TrustProxyHeaders:         boolEnv("TRUST_PROXY_HEADERS", false),
+		AccessTokenTTL:            durationEnv("ACCESS_TOKEN_TTL", 15*time.Minute),
+		RefreshTokenTTL:           durationEnv("REFRESH_TOKEN_TTL", 7*24*time.Hour),
+		LoginRateLimit:            int64Env("LOGIN_RATE_LIMIT", 5),
+		LoginRateLimitWindow:      durationEnv("LOGIN_RATE_LIMIT_WINDOW", 15*time.Minute),
+		RegisterRateLimit:         int64Env("REGISTER_RATE_LIMIT", 10),
+		RegisterRateLimitWindow:   durationEnv("REGISTER_RATE_LIMIT_WINDOW", 15*time.Minute),
+		GoogleClientID:            os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret:        os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleAuthURL:             getenv("GOOGLE_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth"),
+		GoogleTokenURL:            getenv("GOOGLE_TOKEN_URL", "https://oauth2.googleapis.com/token"),
+		GoogleJWKSURL:             getenv("GOOGLE_JWKS_URL", "https://www.googleapis.com/oauth2/v3/certs"),
+		GoogleScopes:              parseCSV(getenv("GOOGLE_SCOPES", "openid,email,profile")),
+		GoogleAllowedRedirectURIs: parseCSV(os.Getenv("GOOGLE_ALLOWED_REDIRECT_URIS")),
 	}
 }
 
@@ -80,6 +84,14 @@ func (c Config) Validate() error {
 	}
 	if c.RegisterRateLimit <= 0 || c.RegisterRateLimitWindow <= 0 {
 		return fmt.Errorf("register rate limit settings must be positive")
+	}
+	if strings.TrimSpace(c.GoogleClientID) != "" || strings.TrimSpace(c.GoogleClientSecret) != "" {
+		if strings.TrimSpace(c.GoogleClientID) == "" || strings.TrimSpace(c.GoogleClientSecret) == "" {
+			return fmt.Errorf("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together")
+		}
+		if !c.IsLocal() && len(c.GoogleAllowedRedirectURIs) == 0 {
+			return fmt.Errorf("GOOGLE_ALLOWED_REDIRECT_URIS is required when Google OAuth is enabled and ENVIRONMENT=%s", c.Environment)
+		}
 	}
 	if c.IsLocal() {
 		return nil
@@ -136,6 +148,18 @@ func parseCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func boolEnv(key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	switch value {
+	case "":
+		return fallback
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func getenv(key string, fallback string) string {

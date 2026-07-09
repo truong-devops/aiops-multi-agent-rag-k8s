@@ -89,13 +89,19 @@ type ConfirmUploadedInput struct {
 }
 
 type UpdateStatusInput struct {
-	VideoID       string
-	Status        string
-	Reason        string
-	ErrorCode     string
-	Actor         Actor
-	RequestID     string
-	CorrelationID string
+	VideoID            string
+	Status             string
+	Reason             string
+	ErrorCode          string
+	ProcessedObjectKey string
+	ThumbnailObjectKey string
+	DurationMs         int64
+	Width              int
+	Height             int
+	SizeBytes          int64
+	Actor              Actor
+	RequestID          string
+	CorrelationID      string
 }
 
 func NewVideoService(store repository.Store, options Options) *VideoService {
@@ -454,6 +460,24 @@ func (s *VideoService) UpdateStatus(ctx context.Context, input UpdateStatusInput
 	video.UpdatedAt = now
 	video.LastRequestID = input.RequestID
 	video.LastCorrelationID = input.CorrelationID
+	if strings.TrimSpace(input.ProcessedObjectKey) != "" {
+		video.ProcessedObjectKey = strings.TrimSpace(input.ProcessedObjectKey)
+	}
+	if strings.TrimSpace(input.ThumbnailObjectKey) != "" {
+		video.ThumbnailObjectKey = strings.TrimSpace(input.ThumbnailObjectKey)
+	}
+	if input.DurationMs > 0 {
+		video.DurationMs = input.DurationMs
+	}
+	if input.Width > 0 {
+		video.Width = input.Width
+	}
+	if input.Height > 0 {
+		video.Height = input.Height
+	}
+	if input.SizeBytes > 0 {
+		video.SizeBytes = input.SizeBytes
+	}
 	if status == domain.VideoStatusFailed {
 		video.ProcessingErrorCode = strings.TrimSpace(input.ErrorCode)
 	}
@@ -476,8 +500,16 @@ func (s *VideoService) UpdateStatus(ctx context.Context, input UpdateStatusInput
 		CorrelationID:  input.CorrelationID,
 		CreatedAt:      now,
 	}
+	var outbox domain.OutboxEvent
+	if status == domain.VideoStatusReady && video.Visibility == domain.VisibilityPublic {
+		outbox, err = event.NewVideoReadyOutbox(video, s.environment, now)
+		if err != nil {
+			s.recordStatusTransition(previousStatus, status, "event_error")
+			return domain.Video{}, err
+		}
+	}
 	startedAt := time.Now()
-	if err := s.store.SaveVideoStatus(ctx, video, history); err != nil {
+	if err := s.store.SaveVideoStatusWithOutbox(ctx, video, history, outbox); err != nil {
 		s.recordDBOperation("save_video_status", startedAt, err)
 		s.recordStatusTransition(previousStatus, status, "db_error")
 		return domain.Video{}, err

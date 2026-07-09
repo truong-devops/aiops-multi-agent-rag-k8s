@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -60,12 +61,17 @@ func NewGateway(routes []config.Route, upstreamTimeout time.Duration, logger *sl
 		proxy.Director = func(req *http.Request) {
 			originalHost := req.Host
 			originalScheme := forwardedProto(req)
+			clientIP := remoteIP(req)
 			originalDirector(req)
 			req.URL.Path = trimPublicAPIPrefix(req.URL.Path)
 			req.URL.RawPath = ""
 			req.Host = target.Host
+			req.Header.Del("X-Forwarded-For")
 			req.Header.Set("X-Forwarded-Host", originalHost)
 			req.Header.Set("X-Forwarded-Proto", originalScheme)
+			if clientIP != "" {
+				req.Header.Set("X-Real-IP", clientIP)
+			}
 			req.Header.Set("X-Gateway", "api-gateway")
 		}
 
@@ -144,13 +150,18 @@ func trimPublicAPIPrefix(path string) string {
 }
 
 func forwardedProto(req *http.Request) string {
-	if proto := req.Header.Get("X-Forwarded-Proto"); proto != "" {
-		return proto
-	}
 	if req.TLS != nil {
 		return "https"
 	}
 	return "http"
+}
+
+func remoteIP(req *http.Request) string {
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return req.RemoteAddr
 }
 
 func WriteError(w http.ResponseWriter, req *http.Request, status int, code string, message string) {

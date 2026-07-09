@@ -262,6 +262,16 @@ func TestIdentityGoogleStartDoesNotExposeCodeVerifier(t *testing.T) {
 	}
 }
 
+func TestIdentityGoogleStartRejectsUnallowedRedirectURI(t *testing.T) {
+	app := newTestAppWithGoogleConfig(t)
+
+	resp := doJSON(t, app, http.MethodGet, "/v1/auth/google/start?redirect_uri=https://evil.example/callback", nil, "")
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("google start status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	assertErrorCode(t, resp.Body.Bytes(), "VALIDATION_ERROR")
+}
+
 func TestIdentityUnknownRouteReturnsJSONError(t *testing.T) {
 	app := newTestApp(t)
 
@@ -334,12 +344,22 @@ func TestIdentityRejectsTrailingJSON(t *testing.T) {
 	assertErrorCode(t, rec.Body.Bytes(), "VALIDATION_ERROR")
 }
 
-func TestClientIPPrefersForwardedHeaders(t *testing.T) {
+func TestClientIPIgnoresForwardedHeadersByDefault(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	req.RemoteAddr = "10.0.0.9:1234"
 	req.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.9")
 
-	if got := clientIP(req); got != "203.0.113.10" {
+	if got := clientIP(req, false); got != "10.0.0.9" {
+		t.Fatalf("clientIP() = %q, want remote address", got)
+	}
+}
+
+func TestClientIPCanTrustForwardedHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.RemoteAddr = "10.0.0.9:1234"
+	req.Header.Set("X-Forwarded-For", "203.0.113.10, 10.0.0.9")
+
+	if got := clientIP(req, true); got != "203.0.113.10" {
 		t.Fatalf("clientIP() = %q, want forwarded client IP", got)
 	}
 }
@@ -359,12 +379,13 @@ func newTestAppWithGoogleConfig(t *testing.T) http.Handler {
 	t.Helper()
 
 	return newTestAppWithGoogle(t, service.GoogleOAuthConfig{
-		ClientID:     "google-client",
-		ClientSecret: "google-secret",
-		AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
-		TokenURL:     "https://oauth2.googleapis.com/token",
-		JWKSURL:      "https://www.googleapis.com/oauth2/v3/certs",
-		Scopes:       []string{"openid", "email", "profile"},
+		ClientID:            "google-client",
+		ClientSecret:        "google-secret",
+		AuthURL:             "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL:            "https://oauth2.googleapis.com/token",
+		JWKSURL:             "https://www.googleapis.com/oauth2/v3/certs",
+		Scopes:              []string{"openid", "email", "profile"},
+		AllowedRedirectURIs: []string{"http://localhost:3000/callback"},
 	})
 }
 
