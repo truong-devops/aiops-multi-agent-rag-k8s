@@ -40,6 +40,7 @@ As of 2026-07-07:
 - `feed-social-service` now has a production-shaped scaffold, config validation, health/readiness/metrics, PostgreSQL feed read model foundation, local in-memory fallback, `feed_items`, `video_social_counters`, `inbox_events`, idempotent ready-video upsert, stable feed list repository query, `GET /v1/feed`, `video.ready.v1` Kafka/Redpanda consumer, controlled internal ingestion fallback, idempotent likes, PostgreSQL comments MVP, durable like/comment counters, follows, optional Redis cache for guest feed/social counters, repository/API/event/cache tests, and a skipped-by-default PostgreSQL integration harness. It still needs full compose/Kubernetes wiring.
 - `live-service` now has a production-shaped MVP for basic app APIs: config validation, local in-memory fallback, PostgreSQL schema/repository, create/list/get live sessions, owner/admin start/end lifecycle transitions, stream key hash storage, live event audit rows, readiness, metrics, and gateway routing for `/api/v1/live-sessions`.
 - `aiops-service` has a Python package layout for future collectors, agents, RAG, scoring, redaction, schemas, and API work.
+- `apps/admin-web` now has a Next.js dashboard skeleton for the product/AIOps demo, calling the API gateway for videos, feed, live sessions, and gateway readiness.
 
 ## Decisions Made
 
@@ -58,6 +59,33 @@ As of 2026-07-07:
 - `video-service` remains the canonical video lifecycle event producer for now; `media-worker` updates status through the internal API and keeps lifecycle event contracts ready for a future direct outbox only if needed.
 
 ## Work Log
+
+### 2026-07-09
+
+- Redesigned `admin-web` again based on the requested professional SaaS operations-dashboard direction.
+- Shifted the UI to a denser control-plane layout: compact top toolbar, restrained dark sidebar, KPI strip, table/list-first content, smaller typography, thin borders, minimal shadows, and semantic status colors.
+- Moved video upload and live session creation into drawers so the main Videos/Live tabs can focus on filters and operational tables.
+- Added owner filtering, environment selector, gateway KPI, and a compact operational queue on the Overview tab.
+- Verified with `npm run lint`, `npm run typecheck`, `npm run build`, `npm audit --omit=dev`, and Playwright desktop/mobile screenshots.
+- Notes for next session: the browser dev overlay is visible only in `next dev`; use production build/start screenshots if evaluating final visual polish.
+
+### 2026-07-09
+
+- Completed a stronger `admin-web` pass after the initial skeleton.
+- Reworked the UI from a lightweight demo dashboard into a denser operations console with professional control-plane styling, flatter panels, clearer tables, responsive mobile layout, and tabbed sections for Overview, Videos, Live, AIOps, and Account.
+- Added browser-side admin flows for register/login/local token storage, video upload intent + presigned upload + upload confirmation, live session creation/start/end, and incident creation against the documented AIOps API surface.
+- Added typed frontend models/API helpers for auth, upload intents, live lifecycle transitions, and incident creation.
+- Verified with `npm run lint`, `npm run typecheck`, `npm run build`, `npm audit --omit=dev`, and Playwright desktop/mobile screenshots against the local dev server.
+- Notes for next session: AIOps incident routes are still backend placeholders, and upstream per-service readiness is not exposed through `api-gateway` yet, so admin-web shows those services as `unknown` by design.
+
+### 2026-07-09
+
+- Added the initial `apps/admin-web` Next.js frontend skeleton based on the product/API docs.
+- Built an operations dashboard with service health status, video pipeline table, feed preview, live session list, and an AIOps/RCA workspace placeholder.
+- Added typed API helpers for `api-gateway` calls to `/api/v1/videos`, `/api/v1/feed`, `/api/v1/live-sessions`, and `/readyz`.
+- Added frontend environment/config files, responsive global CSS, README setup notes, Node `20.19.0` requirement, and dependency overrides so the new app starts from a clean production audit.
+- Verified with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm audit --omit=dev` using Node 20 through `npx`.
+- Notes for next session: add auth/login token handling and real admin actions for upload requests, live session creation, incidents, and RCA reports.
 
 ### 2026-07-09
 
