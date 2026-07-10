@@ -62,6 +62,23 @@ As of 2026-07-07:
 
 ### 2026-07-09
 
+- Refined `apps/mobile-flutter` from a simple MVP screen scaffold into an extensible feature-first Flutter structure.
+- Added `core/config`, `core/network`, `core/session`, and `core/di` layers for environment config, HTTP access, session state, dependency wiring, and lifecycle disposal.
+- Moved auth/feed/video/live/profile code into `features/<feature>/{data,domain,presentation}` with repositories handling API calls and presentation widgets consuming repositories/session controller.
+- Moved common theme/widgets into `shared/theme` and `shared/widgets`.
+- Updated the mobile README with the architecture tree and rules for future feature work.
+- Notes for next session: Flutter/Dart tooling is still unavailable in the current terminal, so run `flutter pub get` and `flutter analyze` once Flutter is installed.
+
+### 2026-07-09
+
+- Added the initial `apps/mobile-flutter` app shell for the end-user mobile demo.
+- Created Flutter project metadata/source structure manually because Flutter/Dart tooling is not installed in the current terminal.
+- Added Material 3 app theme, API client, session/feed/video/upload/live models, shell navigation, and screens for Auth, Feed, Upload, Live, and Profile.
+- Mobile API flow currently covers login, feed listing, my video status listing, upload intent creation, live session listing, and local in-memory session state.
+- Notes for next session: install Flutter and run `flutter pub get`, `flutter analyze`, and `flutter run`; platform folders can be generated later with Flutter tooling. The current API client uses `dart:io`, so it targets iOS/Android rather than Flutter Web.
+
+### 2026-07-09
+
 - Redesigned `admin-web` again based on the requested professional SaaS operations-dashboard direction.
 - Shifted the UI to a denser control-plane layout: compact top toolbar, restrained dark sidebar, KPI strip, table/list-first content, smaller typography, thin borders, minimal shadows, and semantic status colors.
 - Moved video upload and live session creation into drawers so the main Videos/Live tabs can focus on filters and operational tables.
