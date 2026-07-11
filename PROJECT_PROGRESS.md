@@ -62,6 +62,24 @@ As of 2026-07-07:
 
 ### 2026-07-09
 
+- Made the mobile app easier to run and preview before iOS Simulator setup is complete.
+- Refactored the mobile network layer from `dart:io` to `package:http`, keeping repository APIs stable while making the app compatible with Flutter Web as well as iOS.
+- Added `web/` platform files so the mobile UI can be previewed with `flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8080`.
+- Added `cupertino_icons` to satisfy Flutter web/iOS icon font expectations.
+- Verified with `flutter analyze`, `flutter test`, and `flutter build web --dart-define=API_BASE_URL=http://localhost:8080`.
+- Notes for next session: local shell prints `/Users/maccuatruong/.zprofile:11: no such file or directory: /opt/homebrew/bin/brew`; this is an environment shell startup issue, not a Flutter app issue.
+
+### 2026-07-09
+
+- Continued mobile Flutter work after Flutter became available locally.
+- Added real video picking/upload support with `file_picker` and `crypto`: Upload now selects a video file, calculates SHA-256, creates an upload intent, uploads bytes to the presigned URL, and confirms upload with `video-service`.
+- Generated the iOS native project under `apps/mobile-flutter/ios` so the app can run on iOS Simulator once Xcode has an iOS runtime installed.
+- Added a Flutter widget smoke test for the app shell and committed `pubspec.lock` by removing the broad `*.lock` ignore from the mobile app.
+- Verified with `flutter analyze` and `flutter test`.
+- Notes for next session: `flutter build ios --simulator` reaches Xcode but currently fails because the local Xcode install has no iOS Simulator runtime installed; `flutter build ios --no-codesign` reaches signing and then requires a Development Team for physical device builds.
+
+### 2026-07-09
+
 - Refined `apps/mobile-flutter` from a simple MVP screen scaffold into an extensible feature-first Flutter structure.
 - Added `core/config`, `core/network`, `core/session`, and `core/di` layers for environment config, HTTP access, session state, dependency wiring, and lifecycle disposal.
 - Moved auth/feed/video/live/profile code into `features/<feature>/{data,domain,presentation}` with repositories handling API calls and presentation widgets consuming repositories/session controller.

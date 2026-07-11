@@ -27,6 +27,6 @@ class AppDependencies {
 
   void dispose() {
     sessionController.dispose();
-    apiClient.close(force: true);
+    apiClient.close();
   }
 }

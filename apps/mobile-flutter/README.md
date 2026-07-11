@@ -19,7 +19,15 @@ Install Flutter, then run:
 ```bash
 cd apps/mobile-flutter
 flutter pub get
+flutter analyze
+flutter test
 flutter run --dart-define=API_BASE_URL=http://localhost:8080
+```
+
+Preview in Chrome while iOS Simulator runtime is not installed:
+
+```bash
+flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8080
 ```
 
 For Android emulator, use the host loopback address:
@@ -32,9 +40,11 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
 
 - `Auth`: login and local in-memory session.
 - `Feed`: ready videos from `/api/v1/feed`.
-- `Upload`: create upload requests through `/api/v1/videos/upload-requests`.
+- `Upload`: pick a video, calculate SHA-256, create upload request, upload to the presigned URL, and confirm upload.
 - `Live`: live session list from `/api/v1/live-sessions`.
 - `Profile`: session and API configuration.
+- `iOS`: native project files are generated under `ios/`.
+- `Web`: preview project files are generated under `web/` for fast visual checks.
 
 ## Architecture
 
@@ -73,4 +83,33 @@ Rules for future work:
 - Keep app-wide wiring in `core/di/app_dependencies.dart`.
 - Do not place AIOps RCA logic in mobile; mobile is the end-user demo client.
 
-Platform folders (`android/`, `ios/`, etc.) can be generated later with Flutter tooling if needed.
+Additional platform folders such as `android/` can be generated later with Flutter tooling if needed.
+
+## iOS Notes
+
+The iOS project is generated and ready for Simulator once an iOS runtime is installed in Xcode.
+
+```bash
+open ios/Runner.xcworkspace
+flutter build ios --simulator
+```
+
+If Xcode reports that an iOS platform is missing, install the runtime from Xcode Components/Platforms or run:
+
+```bash
+sudo xcodebuild -downloadPlatform iOS
+```
+
+Building for a physical device requires selecting a Development Team in Xcode under `Runner > Signing & Capabilities`.
+
+## Verification
+
+Current checks:
+
+```bash
+flutter analyze
+flutter test
+flutter build web --dart-define=API_BASE_URL=http://localhost:8080
+```
+
+`flutter build ios --simulator` currently requires an installed iOS Simulator runtime in Xcode.

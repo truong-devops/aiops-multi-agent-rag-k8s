@@ -1,3 +1,5 @@
+import 'package:crypto/crypto.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/session/session_controller.dart';
@@ -24,10 +26,9 @@ class UploadScreen extends StatefulWidget {
 class _UploadScreenState extends State<UploadScreen> {
   final _title = TextEditingController();
   final _description = TextEditingController();
-  final _sizeBytes = TextEditingController(text: '1048576');
-  final _checksum = TextEditingController(text: 'demo-checksum');
   String _visibility = 'public';
   String? _message;
+  PlatformFile? _selectedFile;
   bool _loading = false;
   late Future<List<VideoItem>> _videosFuture;
 
@@ -43,8 +44,6 @@ class _UploadScreenState extends State<UploadScreen> {
     widget.sessionController.removeListener(_loadVideos);
     _title.dispose();
     _description.dispose();
-    _sizeBytes.dispose();
-    _checksum.dispose();
     super.dispose();
   }
 
@@ -61,10 +60,34 @@ class _UploadScreenState extends State<UploadScreen> {
         : widget.repository.listMyVideos(session.accessToken);
   }
 
-  Future<void> _createIntent() async {
+  Future<void> _pickVideo() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.video,
+      withData: true,
+    );
+    final file = result?.files.single;
+    if (file == null) {
+      return;
+    }
+    setState(() {
+      _selectedFile = file;
+      if (_title.text.trim().isEmpty) {
+        _title.text = file.name;
+      }
+      _message = null;
+    });
+  }
+
+  Future<void> _uploadVideo() async {
     final session = widget.sessionController.session;
     if (session == null) {
       setState(() => _message = 'Sign in before uploading.');
+      return;
+    }
+    final file = _selectedFile;
+    final bytes = file?.bytes;
+    if (file == null || bytes == null || bytes.isEmpty) {
+      setState(() => _message = 'Choose a video file first.');
       return;
     }
 
@@ -73,17 +96,32 @@ class _UploadScreenState extends State<UploadScreen> {
       _message = null;
     });
     try {
+      final checksum = sha256.convert(bytes).toString();
+      final contentType = _contentTypeFor(file.extension);
       final intent = await widget.repository.createUploadIntent(
         token: session.accessToken,
-        title: _title.text.trim(),
+        title: _title.text.trim().isEmpty ? file.name : _title.text.trim(),
         description: _description.text.trim(),
         visibility: _visibility,
-        contentType: 'video/mp4',
-        sizeBytes: int.tryParse(_sizeBytes.text.trim()) ?? 0,
-        checksumSha256: _checksum.text.trim(),
+        contentType: contentType,
+        sizeBytes: file.size,
+        checksumSha256: checksum,
+      );
+      await widget.repository.uploadObject(
+        uploadUrl: Uri.parse(intent.uploadUrl),
+        bytes: bytes,
+        contentType: contentType,
+      );
+      await widget.repository.confirmUploaded(
+        token: session.accessToken,
+        videoId: intent.videoId,
+        uploadRequestId: intent.uploadRequestId,
+        sizeBytes: file.size,
+        checksumSha256: checksum,
       );
       setState(() {
-        _message = 'Upload URL ready for ${intent.videoId}.';
+        _selectedFile = null;
+        _message = 'Uploaded ${intent.videoId}. Processing should start soon.';
       });
       _loadVideos();
     } catch (error) {
@@ -107,7 +145,7 @@ class _UploadScreenState extends State<UploadScreen> {
         const SizedBox(height: 12),
         AppSection(
           title: 'New video',
-          subtitle: 'File picker integration can be added after platform setup.',
+          subtitle: 'Pick a video, upload it, then track processing.',
           child: Column(
             children: [
               TextField(controller: _title, decoration: const InputDecoration(labelText: 'Title')),
@@ -120,7 +158,7 @@ class _UploadScreenState extends State<UploadScreen> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                value: _visibility,
+                initialValue: _visibility,
                 decoration: const InputDecoration(labelText: 'Visibility'),
                 items: const [
                   DropdownMenuItem(value: 'public', child: Text('Public')),
@@ -129,13 +167,21 @@ class _UploadScreenState extends State<UploadScreen> {
                 onChanged: (value) => setState(() => _visibility = value ?? 'public'),
               ),
               const SizedBox(height: 10),
-              TextField(
-                controller: _sizeBytes,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Size bytes'),
+              OutlinedButton.icon(
+                onPressed: _loading ? null : _pickVideo,
+                icon: const Icon(Icons.video_file_outlined),
+                label: Text(_selectedFile == null ? 'Choose video' : _selectedFile!.name),
               ),
-              const SizedBox(height: 10),
-              TextField(controller: _checksum, decoration: const InputDecoration(labelText: 'SHA-256 checksum')),
+              if (_selectedFile != null) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '${_formatBytes(_selectedFile!.size)} · ${_contentTypeFor(_selectedFile!.extension)}',
+                    style: const TextStyle(color: Color(0xFF6B7280)),
+                  ),
+                ),
+              ],
               if (_message != null) ...[
                 const SizedBox(height: 10),
                 Text(_message!, style: const TextStyle(color: Color(0xFF374151))),
@@ -144,9 +190,9 @@ class _UploadScreenState extends State<UploadScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _loading ? null : _createIntent,
+                  onPressed: _loading ? null : _uploadVideo,
                   icon: const Icon(Icons.cloud_upload_outlined),
-                  label: Text(_loading ? 'Creating...' : 'Create upload intent'),
+                  label: Text(_loading ? 'Uploading...' : 'Upload video'),
                 ),
               ),
             ],
@@ -177,6 +223,25 @@ class _UploadScreenState extends State<UploadScreen> {
         ),
       ],
     );
+  }
+
+  String _contentTypeFor(String? extension) {
+    return switch ((extension ?? '').toLowerCase()) {
+      'mov' => 'video/quicktime',
+      'm4v' => 'video/x-m4v',
+      'webm' => 'video/webm',
+      _ => 'video/mp4',
+    };
+  }
+
+  String _formatBytes(int value) {
+    if (value < 1024) {
+      return '$value B';
+    }
+    if (value < 1024 * 1024) {
+      return '${(value / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(value / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 }
 

@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 
 ThemeData buildAppTheme() {
   const seed = Color(0xFF2563EB);
+  // ignore: prefer_const_constructors
   final scheme = ColorScheme.fromSeed(
     seedColor: seed,
     brightness: Brightness.light,
-    surface: Color(0xFFFFFFFF),
+    surface: const Color(0xFFFFFFFF),
   );
 
   return ThemeData(

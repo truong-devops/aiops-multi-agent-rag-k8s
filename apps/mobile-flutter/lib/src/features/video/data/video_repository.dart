@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../../../core/network/api_client.dart';
 import '../domain/upload_intent.dart';
 import '../domain/video_item.dart';
@@ -41,5 +43,37 @@ class VideoRepository {
       },
     );
     return UploadIntent.fromJson(body['data'] as Map<String, dynamic>);
+  }
+
+  Future<void> uploadObject({
+    required Uri uploadUrl,
+    required Uint8List bytes,
+    required String contentType,
+  }) {
+    return _apiClient.putBytes(
+      uploadUrl,
+      bytes: bytes,
+      contentType: contentType,
+    );
+  }
+
+  Future<VideoItem> confirmUploaded({
+    required String token,
+    required String videoId,
+    required String uploadRequestId,
+    required int sizeBytes,
+    required String checksumSha256,
+  }) async {
+    final body = await _apiClient.post(
+      '/api/v1/videos/$videoId/uploaded',
+      token: token,
+      body: {
+        'upload_request_id': uploadRequestId,
+        'size_bytes': sizeBytes,
+        'checksum_sha256': checksumSha256,
+      },
+    );
+    final data = body['data'] as Map<String, dynamic>;
+    return VideoItem.fromJson(data['video'] as Map<String, dynamic>);
   }
 }
