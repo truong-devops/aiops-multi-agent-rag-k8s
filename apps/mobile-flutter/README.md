@@ -102,6 +102,8 @@ sudo xcodebuild -downloadPlatform iOS
 
 Building for a physical device requires selecting a Development Team in Xcode under `Runner > Signing & Capabilities`.
 
+If the local machine does not have enough disk space for the iOS Simulator runtime, use the Chrome preview command above until space is available.
+
 ## Verification
 
 Current checks:
