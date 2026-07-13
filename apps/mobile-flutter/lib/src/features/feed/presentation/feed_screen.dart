@@ -45,7 +45,9 @@ class _FeedScreenState extends State<FeedScreen> {
                 const LinearProgressIndicator(),
               if (snapshot.hasError)
                 AppEmptyState(label: snapshot.error.toString()),
-              if (!snapshot.hasError && items.isEmpty && snapshot.connectionState != ConnectionState.waiting)
+              if (!snapshot.hasError &&
+                  items.isEmpty &&
+                  snapshot.connectionState != ConnectionState.waiting)
                 const AppEmptyState(label: 'No ready videos yet.'),
               ...items.map((item) => _FeedCard(item: item)),
             ],
@@ -77,7 +79,8 @@ class _FeedCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: const Center(
-                child: Icon(Icons.play_arrow_rounded, size: 58, color: Colors.white),
+                child: Icon(Icons.play_arrow_rounded,
+                    size: 58, color: Colors.white),
               ),
             ),
             const SizedBox(height: 12),
@@ -86,7 +89,8 @@ class _FeedCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     item.title.isEmpty ? item.videoId : item.title,
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800, fontSize: 16),
                   ),
                 ),
                 const StatusChip(label: 'ready', tone: StatusTone.ready),
@@ -94,7 +98,8 @@ class _FeedCard extends StatelessWidget {
             ),
             if (item.description.isNotEmpty) ...[
               const SizedBox(height: 6),
-              Text(item.description, style: const TextStyle(color: Color(0xFF6B7280))),
+              Text(item.description,
+                  style: const TextStyle(color: Color(0xFF6B7280))),
             ],
             const SizedBox(height: 10),
             Text(

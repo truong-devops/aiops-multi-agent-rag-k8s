@@ -5,7 +5,8 @@ import '../domain/upload_intent.dart';
 import '../domain/video_item.dart';
 
 class VideoRepository {
-  const VideoRepository({required ApiClient apiClient}) : _apiClient = apiClient;
+  const VideoRepository({required ApiClient apiClient})
+      : _apiClient = apiClient;
 
   final ApiClient _apiClient;
 

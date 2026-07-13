@@ -13,7 +13,11 @@ class StatusChip extends StatelessWidget {
     final normalized = status.toLowerCase();
     final tone = switch (normalized) {
       'ready' || 'live' || 'active' => StatusTone.ready,
-      'pending' || 'uploaded' || 'processing' || 'scheduled' => StatusTone.warning,
+      'pending' ||
+      'uploaded' ||
+      'processing' ||
+      'scheduled' =>
+        StatusTone.warning,
       'failed' || 'ended' || 'disabled' => StatusTone.danger,
       _ => StatusTone.neutral,
     };

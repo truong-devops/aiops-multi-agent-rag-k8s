@@ -41,6 +41,7 @@ class _AppShellState extends State<AppShell> {
     final dependencies = widget.dependencies;
     final sessionController = dependencies.sessionController;
     final session = sessionController.session;
+    final isRestoringSession = sessionController.isRestoring;
     final pages = [
       FeedScreen(repository: dependencies.feedRepository),
       UploadScreen(
@@ -62,9 +63,21 @@ class _AppShellState extends State<AppShell> {
         title: const _AppTitle(),
         actions: [
           TextButton.icon(
-            onPressed: () => _openAuth(context),
-            icon: Icon(session == null ? Icons.login : Icons.verified_user_outlined),
-            label: Text(session == null ? 'Sign in' : 'Signed in'),
+            onPressed: isRestoringSession ? null : () => _openAuth(context),
+            icon: Icon(
+              isRestoringSession
+                  ? Icons.hourglass_empty
+                  : session == null
+                      ? Icons.login
+                      : Icons.verified_user_outlined,
+            ),
+            label: Text(
+              isRestoringSession
+                  ? 'Checking'
+                  : session == null
+                      ? 'Sign in'
+                      : 'Signed in',
+            ),
           ),
           const SizedBox(width: 8),
         ],
@@ -106,10 +119,11 @@ class _AppShellState extends State<AppShell> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (context) => AuthSheet(repository: widget.dependencies.authRepository),
+      builder: (context) =>
+          AuthSheet(repository: widget.dependencies.authRepository),
     );
     if (session != null) {
-      widget.dependencies.sessionController.setSession(session);
+      await widget.dependencies.sessionController.setSession(session);
     }
   }
 }

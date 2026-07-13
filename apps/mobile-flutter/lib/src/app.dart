@@ -18,6 +18,12 @@ class _AiopsVideoMobileAppState extends State<AiopsVideoMobileApp> {
   );
 
   @override
+  void initState() {
+    super.initState();
+    _dependencies.sessionController.restore();
+  }
+
+  @override
   void dispose() {
     _dependencies.dispose();
     super.dispose();

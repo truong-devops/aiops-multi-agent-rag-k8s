@@ -59,9 +59,11 @@ class _AuthSheetState extends State<AuthSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Sign in', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+          const Text('Sign in',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
           const SizedBox(height: 4),
-          const Text('Use an identity-service account.', style: TextStyle(color: Color(0xFF6B7280))),
+          const Text('Use an identity-service account.',
+              style: TextStyle(color: Color(0xFF6B7280))),
           const SizedBox(height: 16),
           TextField(
             controller: _email,

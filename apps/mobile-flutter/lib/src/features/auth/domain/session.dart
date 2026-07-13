@@ -22,6 +22,16 @@ class Session {
       user: User.fromJson(json['user'] as Map<String, dynamic>? ?? const {}),
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'access_token': accessToken,
+      'refresh_token': refreshToken,
+      'token_type': tokenType,
+      'expires_in': expiresIn,
+      'user': user.toJson(),
+    };
+  }
 }
 
 class User {
@@ -46,5 +56,14 @@ class User {
           .map((role) => role.toString())
           .toList(),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'email': email,
+      'display_name': displayName,
+      'roles': roles,
+    };
   }
 }

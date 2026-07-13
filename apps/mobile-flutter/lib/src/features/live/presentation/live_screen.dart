@@ -73,9 +73,12 @@ class _LiveScreenState extends State<LiveScreen> {
                 const LinearProgressIndicator(),
               if (snapshot.hasError)
                 AppEmptyState(label: snapshot.error.toString()),
-              if (items.isEmpty && snapshot.connectionState != ConnectionState.waiting)
+              if (items.isEmpty &&
+                  snapshot.connectionState != ConnectionState.waiting)
                 AppEmptyState(
-                  label: widget.sessionController.session == null ? 'Sign in to view live sessions.' : 'No sessions yet.',
+                  label: widget.sessionController.session == null
+                      ? 'Sign in to view live sessions.'
+                      : 'No sessions yet.',
                 ),
               ...items.map((session) => _LiveCard(session: session)),
             ],
@@ -98,7 +101,8 @@ class _LiveCard extends StatelessWidget {
       child: ListTile(
         leading: const Icon(Icons.sensors),
         title: Text(session.title.isEmpty ? session.id : session.title),
-        subtitle: Text(session.playbackUrl.isEmpty ? session.id : session.playbackUrl),
+        subtitle: Text(
+            session.playbackUrl.isEmpty ? session.id : session.playbackUrl),
         trailing: StatusChip.fromStatus(session.status),
       ),
     );

@@ -26,7 +26,9 @@ class ProfileScreen extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         AppSection(
-          title: user?.displayName.isNotEmpty == true ? user!.displayName : 'Guest',
+          title: user?.displayName.isNotEmpty == true
+              ? user!.displayName
+              : 'Guest',
           subtitle: user?.email ?? 'Not signed in',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -34,11 +36,31 @@ class ProfileScreen extends StatelessWidget {
               _InfoRow(label: 'API', value: config.apiBaseUrl),
               _InfoRow(label: 'User ID', value: user?.id ?? '-'),
               _InfoRow(label: 'Roles', value: user?.roles.join(', ') ?? '-'),
+              _InfoRow(
+                label: 'Session',
+                value: sessionController.isRestoring
+                    ? 'Restoring'
+                    : sessionController.isSignedIn
+                        ? 'Saved'
+                        : 'Guest',
+              ),
+              if (sessionController.storageError != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    sessionController.storageError!,
+                    style: const TextStyle(color: Color(0xFFB45309)),
+                  ),
+                ),
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: sessionController.isSignedIn ? sessionController.clear : null,
+                  onPressed: sessionController.isSignedIn
+                      ? () async {
+                          await sessionController.clear();
+                        }
+                      : null,
                   icon: const Icon(Icons.logout),
                   label: const Text('Sign out'),
                 ),
@@ -66,7 +88,8 @@ class _InfoRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 76,
-            child: Text(label, style: const TextStyle(color: Color(0xFF6B7280))),
+            child:
+                Text(label, style: const TextStyle(color: Color(0xFF6B7280))),
           ),
           Expanded(child: Text(value)),
         ],

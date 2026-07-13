@@ -148,7 +148,9 @@ class _UploadScreenState extends State<UploadScreen> {
           subtitle: 'Pick a video, upload it, then track processing.',
           child: Column(
             children: [
-              TextField(controller: _title, decoration: const InputDecoration(labelText: 'Title')),
+              TextField(
+                  controller: _title,
+                  decoration: const InputDecoration(labelText: 'Title')),
               const SizedBox(height: 10),
               TextField(
                 controller: _description,
@@ -164,13 +166,16 @@ class _UploadScreenState extends State<UploadScreen> {
                   DropdownMenuItem(value: 'public', child: Text('Public')),
                   DropdownMenuItem(value: 'private', child: Text('Private')),
                 ],
-                onChanged: (value) => setState(() => _visibility = value ?? 'public'),
+                onChanged: (value) =>
+                    setState(() => _visibility = value ?? 'public'),
               ),
               const SizedBox(height: 10),
               OutlinedButton.icon(
                 onPressed: _loading ? null : _pickVideo,
                 icon: const Icon(Icons.video_file_outlined),
-                label: Text(_selectedFile == null ? 'Choose video' : _selectedFile!.name),
+                label: Text(_selectedFile == null
+                    ? 'Choose video'
+                    : _selectedFile!.name),
               ),
               if (_selectedFile != null) ...[
                 const SizedBox(height: 8),
@@ -184,7 +189,8 @@ class _UploadScreenState extends State<UploadScreen> {
               ],
               if (_message != null) ...[
                 const SizedBox(height: 10),
-                Text(_message!, style: const TextStyle(color: Color(0xFF374151))),
+                Text(_message!,
+                    style: const TextStyle(color: Color(0xFF374151))),
               ],
               const SizedBox(height: 14),
               SizedBox(
@@ -216,7 +222,8 @@ class _UploadScreenState extends State<UploadScreen> {
                 return const AppEmptyState(label: 'No videos yet.');
               }
               return Column(
-                children: items.map((video) => _VideoRow(video: video)).toList(),
+                children:
+                    items.map((video) => _VideoRow(video: video)).toList(),
               );
             },
           ),

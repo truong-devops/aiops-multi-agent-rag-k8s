@@ -65,7 +65,8 @@ class ApiClient {
     final headers = <String, String>{
       'Accept': 'application/json',
       if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-      if (idempotencyKey != null && idempotencyKey.isNotEmpty) 'Idempotency-Key': idempotencyKey,
+      if (idempotencyKey != null && idempotencyKey.isNotEmpty)
+        'Idempotency-Key': idempotencyKey,
     };
 
     late final http.Response response;
@@ -91,7 +92,9 @@ class ApiClient {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final error = payload['error'] as Map<String, dynamic>?;
       throw ApiException(
-        error?['message'] as String? ?? response.reasonPhrase ?? 'Request failed',
+        error?['message'] as String? ??
+            response.reasonPhrase ??
+            'Request failed',
         response.statusCode,
       );
     }

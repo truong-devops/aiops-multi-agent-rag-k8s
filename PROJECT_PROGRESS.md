@@ -60,6 +60,13 @@ As of 2026-07-07:
 
 ## Work Log
 
+### 2026-07-13
+
+- Continued the Flutter mobile app with persistent session handling.
+- Added a `SessionStore` abstraction backed by `flutter_secure_storage`, JSON serialization for auth session/user models, async restore/save/clear behavior in `SessionController`, and UI state for restoring/saved/guest sessions.
+- Updated the mobile README to note secure session persistence.
+- Verified with `flutter analyze` and `flutter test`.
+
 ### 2026-07-09
 
 - Made the mobile app easier to run and preview before iOS Simulator setup is complete.

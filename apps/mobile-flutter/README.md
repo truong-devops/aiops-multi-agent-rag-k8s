@@ -14,7 +14,7 @@ The mobile app represents the end-user product experience. Admin and RCA workflo
 
 ## Development
 
-Install Flutter, then run:
+Install Flutter `3.38.4+`, then run:
 
 ```bash
 cd apps/mobile-flutter
@@ -39,6 +39,7 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080
 ## Current App Shell
 
 - `Auth`: login and local in-memory session.
+- `Session`: access token persistence through platform secure storage.
 - `Feed`: ready videos from `/api/v1/feed`.
 - `Upload`: pick a video, calculate SHA-256, create upload request, upload to the presigned URL, and confirm upload.
 - `Live`: live session list from `/api/v1/live-sessions`.

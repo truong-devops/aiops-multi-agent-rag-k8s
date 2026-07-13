@@ -5,11 +5,13 @@ import '../../features/video/data/video_repository.dart';
 import '../config/app_config.dart';
 import '../network/api_client.dart';
 import '../session/session_controller.dart';
+import '../session/session_store.dart';
 
 class AppDependencies {
   AppDependencies({required this.config})
       : apiClient = ApiClient(baseUrl: config.apiBaseUrl),
-        sessionController = SessionController() {
+        sessionController =
+            SessionController(store: const SecureSessionStore()) {
     authRepository = AuthRepository(apiClient: apiClient);
     feedRepository = FeedRepository(apiClient: apiClient);
     videoRepository = VideoRepository(apiClient: apiClient);
